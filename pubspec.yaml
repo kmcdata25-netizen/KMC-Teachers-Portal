@@ -1,0 +1,46 @@
+name: kmc_teacher_app
+description: Kasarani Music Center Teacher Portal Native Android Application
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # UI & Typography
+  google_fonts: ^6.2.1
+
+  # State Management & Utilities
+  provider: ^6.1.2
+  intl: ^0.19.0
+
+  # Storage & Network
+  shared_preferences: ^2.3.2
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  open_filex: ^4.7.0
+
+  # Supabase Backend
+  supabase_flutter: ^2.8.0
+
+  # Media Streaming
+  video_player: ^2.9.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - Images/App Icon/
+    - Images/design bench mark (theme for banding)/
+    - Images/Favicom/
+    - Images/logos/
+    - Images/background images/
+    - Images/Notification/
