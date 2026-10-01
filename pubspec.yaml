@@ -1,7 +1,7 @@
 name: kmc_teacher_app
 description: Kasarani Music Center Teacher Portal Native Android Application
 publish_to: 'none'
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -21,6 +21,7 @@ dependencies:
   # Storage & Network
   shared_preferences: ^2.3.2
   package_info_plus: ^10.2.1
+  flutter_local_notifications: ^22.3.0
   http: ^1.6.0
   path_provider: ^2.1.6
   open_filex: ^4.7.0

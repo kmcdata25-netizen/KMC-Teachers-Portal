@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../data/mock_teacher_data.dart';
+import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
 import '../services/teacher_update_service.dart';
 import '../theme/app_theme.dart';
@@ -521,6 +522,37 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
               onChanged: (val) {
                 setState(() => _notificationsEnabled = val);
               },
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () async {
+                await TeacherNotificationService.instance.requestPermission();
+                await TeacherNotificationService.instance.showNotification(
+                  id: 999,
+                  title: '🚨 KMC Broadcast Test Alert',
+                  body: 'Admin broadcast notification system is live and verified on your device.',
+                  subText: 'Director Office • Test Notice',
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Test notification dispatched to Android system tray!'),
+                      backgroundColor: AppTheme.brandGreen,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.notifications_active_rounded, size: 16, color: AppTheme.brandGreen),
+              label: const Text(
+                'Test Android System Notification',
+                style: TextStyle(color: AppTheme.brandGreen, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppTheme.brandGreen),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                minimumSize: const Size.fromHeight(38),
+              ),
             ),
           ],
         ),

@@ -1,9 +1,9 @@
 {
   "app_name": "KMC teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.1",
-  "latest_build_number": 2,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.1/KMC_Teacher_Portal_v1.0.1_b2.apk",
-  "release_notes": "Faculty authentication fix for Central Mind database relations, seamless in-app OTA updates without uninstallation, live timetable sync, student practice drill evaluations, and production keystore signing.",
+  "latest_version": "1.0.2",
+  "latest_build_number": 3,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.2/KMC_Teacher_Portal_v1.0.2_b3.apk",
+  "release_notes": "Added native Android notification alerts with heads-up banners, sound, and vibration for Director broadcasts and emergency memos dispatched from the Admin App.",
   "force_update": false
 }

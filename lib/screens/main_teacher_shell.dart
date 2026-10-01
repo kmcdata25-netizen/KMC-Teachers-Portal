@@ -4,6 +4,7 @@ import 'teacher_schedule_screen.dart';
 import 'teacher_students_screen.dart';
 import 'teacher_submissions_screen.dart';
 import 'teacher_profile_screen.dart';
+import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
 import '../services/teacher_update_service.dart';
 import '../theme/app_theme.dart';
@@ -51,6 +52,10 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
     final teacher = TeacherSupabaseService.instance.activeTeacher ??
         await TeacherSupabaseService.instance.checkSavedSession();
     if (teacher != null) {
+      TeacherNotificationService.instance.startRealtimeBroadcastListener(
+        teacherId: teacher.id,
+        facultyCode: teacher.facultyId,
+      );
       final stats = await TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
       if (mounted) {
         setState(() {

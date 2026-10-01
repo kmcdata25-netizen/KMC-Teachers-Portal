@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'config/supabase_config.dart';
 import 'screens/splash_screen.dart';
+import 'services/teacher_notification_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -12,6 +14,14 @@ Future<void> main() async {
     await TeacherSupabaseConfig.initialize();
   } catch (e) {
     debugPrint('[KMC Teacher] Supabase init warning: $e');
+  }
+
+  // Initialize Native Android Notification Service & Broadcast Listener
+  try {
+    await TeacherNotificationService.instance.initialize();
+    unawaited(TeacherNotificationService.instance.startRealtimeBroadcastListener());
+  } catch (e) {
+    debugPrint('[KMC Teacher] Notification service init warning: $e');
   }
 
   // Set system navigation and status bar style
