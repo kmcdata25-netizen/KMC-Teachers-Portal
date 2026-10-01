@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import 'main_teacher_shell.dart';
+import 'teacher_login_screen.dart';
 
 /// Preload / Splash Screen for Kasarani Music Center Teacher Portal.
 /// Features guaranteed multi-step preload animation, official school logo,
@@ -68,22 +70,24 @@ class _SplashScreenState extends State<SplashScreen> {
 
         if (rawProgress >= 1.0) {
           timer.cancel();
-          debugPrint('[KMC] Preload complete, transitioning to MainTeacherShell');
-          // Brief pause at 100% so the user sees completion, then navigate
-          Future.delayed(const Duration(milliseconds: 350), () {
-            if (mounted) {
-              Navigator.of(context).pushReplacement(
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) =>
-                      const MainTeacherShell(),
-                  transitionsBuilder:
-                      (context, animation, secondaryAnimation, child) {
-                    return FadeTransition(opacity: animation, child: child);
-                  },
-                  transitionDuration: const Duration(milliseconds: 600),
-                ),
-              );
-            }
+          debugPrint('[KMC] Preload complete, checking saved faculty session');
+          Future.delayed(const Duration(milliseconds: 350), () async {
+            if (!mounted) return;
+            final session = await TeacherSupabaseService.instance.checkSavedSession();
+            if (!mounted) return;
+            final targetScreen = session != null
+                ? const MainTeacherShell()
+                : const TeacherLoginScreen();
+
+            Navigator.of(context).pushReplacement(
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) => targetScreen,
+                transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+                transitionDuration: const Duration(milliseconds: 600),
+              ),
+            );
           });
         }
       });

@@ -17,6 +17,7 @@ class AppTheme {
   static const Color accentSky = Color(0xFF69C5E6);
   static const Color brandGold = Color(0xFFF0BD55);
   static const Color danger = Color(0xFFE57668);
+  static const Color accentCoral = Color(0xFFE57668);
   static const Color textWhite = Color(0xFFF5F9FB);
   static const Color textMuted = Color(0xFFB8CBD7);
   static const Color borderOutline = Color(0xFF28516B);

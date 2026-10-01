@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import '../config/supabase_config.dart';
 import '../data/mock_teacher_data.dart';
+import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/student_communication_sheet.dart';
 
 class TeacherDashboardScreen extends StatefulWidget {
   final Function(int) onNavigateTab;
@@ -15,11 +18,43 @@ class TeacherDashboardScreen extends StatefulWidget {
 }
 
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
-  final profile = MockTeacherData.currentTeacher;
-  final metrics = MockTeacherData.metrics;
-  final classes = MockTeacherData.todaySchedule;
+  TeacherProfile profile = MockTeacherData.currentTeacher;
+  Map<String, dynamic> _stats = {
+    'activeStudents': 0,
+    'classesToday': 0,
+    'pendingReviews': 0,
+    'teachingHours': 0.0,
+  };
+  List<TeacherClass> classes = [];
+  bool _isLoading = true;
 
-  void _cycleAttendance(TeacherClass tc) {
+  @override
+  void initState() {
+    super.initState();
+    _loadLiveDashboard();
+  }
+
+  Future<void> _loadLiveDashboard() async {
+    setState(() => _isLoading = true);
+    TeacherProfile? teacher = TeacherSupabaseService.instance.activeTeacher;
+    teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
+    teacher ??= MockTeacherData.currentTeacher;
+
+    final statsFuture = TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
+    final scheduleFuture = TeacherSupabaseService.instance.fetchTeacherSchedule(teacher, DateTime.now());
+    final results = await Future.wait([statsFuture, scheduleFuture]);
+
+    if (mounted) {
+      setState(() {
+        profile = teacher!;
+        _stats = results[0] as Map<String, dynamic>;
+        classes = results[1] as List<TeacherClass>;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _cycleAttendance(TeacherClass tc) async {
     setState(() {
       switch (tc.attendance) {
         case AttendanceState.unmarked:
@@ -37,14 +72,48 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       }
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Attendance for ${tc.studentName}: ${tc.attendance.name.toUpperCase()}',
+    await TeacherSupabaseService.instance.updateSessionAttendance(tc.id, tc.attendance);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✓ Attendance for ${tc.studentName}: ${tc.attendance.name.toUpperCase()} (Saved to Central Mind)',
+          ),
+          backgroundColor: AppTheme.brandGreen,
+          duration: const Duration(seconds: 2),
         ),
-        duration: const Duration(seconds: 1),
+      );
+    }
+  }
+
+  List<TeacherMetric> get metrics {
+    return [
+      TeacherMetric(
+        label: 'Active Students',
+        value: '${_stats['activeStudents'] ?? 0}',
+        subtitle: 'Enrolled in Department',
+        iconKey: 'students',
       ),
-    );
+      TeacherMetric(
+        label: 'Classes Today',
+        value: '${_stats['classesToday'] ?? 0}',
+        subtitle: '${classes.length} Sessions on Timetable',
+        iconKey: 'schedule',
+      ),
+      TeacherMetric(
+        label: 'Pending Reviews',
+        value: '${_stats['pendingReviews'] ?? 0}',
+        subtitle: 'Student Practice Drills',
+        iconKey: 'reviews',
+      ),
+      TeacherMetric(
+        label: 'Teaching Hours',
+        value: '${_stats['teachingHours'] ?? 0} hrs',
+        subtitle: 'Verified Cycle Hours',
+        iconKey: 'hours',
+      ),
+    ];
   }
 
   @override
@@ -52,72 +121,100 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     return Scaffold(
       backgroundColor: AppTheme.primaryBackground,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Top Profile & Greeting Row
-              _buildHeader(context),
-              const SizedBox(height: 20),
-
-              // Active / Next Class Alert Banner
-              _buildNextClassCard(context),
-              const SizedBox(height: 24),
-
-              // Quick Metrics Grid (2x2)
-              _buildMetricsGrid(context),
-              const SizedBox(height: 24),
-
-              // Quick Action Bar
-              _buildQuickActionBar(context),
-              const SizedBox(height: 24),
-
-              // Today's Teaching Schedule Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "Today's Schedule",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textWhite,
-                    ),
+        child: RefreshIndicator(
+          onRefresh: _loadLiveDashboard,
+          color: AppTheme.brandGreen,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_isLoading)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: LinearProgressIndicator(color: AppTheme.brandGreen, backgroundColor: AppTheme.surfaceElevated),
                   ),
-                  TextButton.icon(
-                    onPressed: () => widget.onNavigateTab(1), // Go to Schedule tab
-                    icon: const Icon(Icons.arrow_forward_rounded, size: 16, color: AppTheme.brandGreen),
-                    label: const Text(
-                      'View Timetable',
+
+                // Top Profile & Greeting Row
+                _buildHeader(context),
+                const SizedBox(height: 20),
+
+                // Active / Next Class Alert Banner
+                _buildNextClassCard(context),
+                const SizedBox(height: 24),
+
+                // Quick Metrics Grid (2x2)
+                _buildMetricsGrid(context),
+                const SizedBox(height: 24),
+
+                // Quick Action Bar
+                _buildQuickActionBar(context),
+                const SizedBox(height: 24),
+
+                // Today's Teaching Schedule Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Today's Schedule",
                       style: TextStyle(
-                        color: AppTheme.brandGreen,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textWhite,
                       ),
                     ),
+                    TextButton.icon(
+                      onPressed: () => widget.onNavigateTab(1), // Go to Schedule tab
+                      icon: const Icon(Icons.arrow_forward_rounded, size: 16, color: AppTheme.brandGreen),
+                      label: const Text(
+                        'View Timetable',
+                        style: TextStyle(
+                          color: AppTheme.brandGreen,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Classes List for Today
+                if (classes.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceCard,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.borderOutline),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'No studio sessions scheduled for today.\nRooms are open for faculty practice.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                    ),
+                  )
+                else
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: classes.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = classes[index];
+                      return _buildScheduleItemCard(context, item);
+                    },
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
+                const SizedBox(height: 24),
 
-              // Classes List for Today
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: classes.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final item = classes[index];
-                  return _buildScheduleItemCard(context, item);
-                },
-              ),
-              const SizedBox(height: 24),
-
-              // Pending Submissions Queue Teaser
-              _buildSubmissionsTeaser(context),
-              const SizedBox(height: 24),
-            ],
+                // Pending Submissions Queue Teaser
+                _buildSubmissionsTeaser(context),
+                const SizedBox(height: 24),
+              ],
+            ),
           ),
         ),
       ),
@@ -206,14 +303,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
         Stack(
           children: [
             IconButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Notifications: 3 unread teacher alerts & drill submissions.'),
-                  ),
-                );
-              },
+              onPressed: () => _showTeacherAnnouncementsSheet(context),
               icon: const Icon(Icons.notifications_outlined, color: AppTheme.textWhite),
+              tooltip: 'School Announcements',
             ),
             Positioned(
               right: 10,
@@ -222,7 +314,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 width: 8,
                 height: 8,
                 decoration: const BoxDecoration(
-                  color: AppTheme.danger,
+                  color: AppTheme.brandGreen,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -233,7 +325,241 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     );
   }
 
+  void _showTeacherAnnouncementsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: () async {
+            if (!TeacherSupabaseConfig.isInitialized) return <Map<String, dynamic>>[];
+            try {
+              final client = TeacherSupabaseConfig.client;
+              // 1. Fetch from dedicated notifications table
+              try {
+                final notifs = await client
+                    .from('notifications')
+                    .select()
+                    .inFilter('recipient_type', ['all', 'everyone', 'faculty', 'all_faculty', 'individual_teacher', 'single', 'pair'])
+                    .order('created_at', ascending: false)
+                    .limit(25);
+
+                final nList = notifs as List;
+                if (nList.isNotEmpty) {
+                  return nList.map((row) {
+                    final m = row as Map<String, dynamic>;
+                    String label = 'All Faculty';
+                    final rType = m['recipient_type']?.toString().toLowerCase();
+                    if (rType == 'individual_teacher' || rType == 'single') {
+                      label = 'Personal Faculty Memo';
+                    } else if (rType == 'pair') {
+                      label = 'Rehearsal Notice (Pair)';
+                    } else if (rType == 'all' || rType == 'everyone') {
+                      label = 'School Broadcast';
+                    }
+                    return {
+                      'title': m['title']?.toString() ?? 'Faculty Notice',
+                      'subtitle': m['message']?.toString() ?? '',
+                      'cta_label': label,
+                      'created_at': m['created_at'],
+                    };
+                  }).toList();
+                }
+              } catch (ne) {
+                debugPrint('[TeacherApp] Dedicated notifications fetch notice: $ne');
+              }
+
+              // 2. Fallback to promotions table
+              final res = await client
+                  .from('promotions')
+                  .select()
+                  .inFilter('cta_target', ['broadcast:everyone', 'broadcast:all', 'broadcast:faculty'])
+                  .eq('is_active', true)
+                  .order('created_at', ascending: false);
+              return List<Map<String, dynamic>>.from(res as List);
+            } catch (e) {
+              debugPrint('[TeacherApp] Fetch broadcasts error: $e');
+              return <Map<String, dynamic>>[];
+            }
+          }(),
+          builder: (context, snapshot) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.borderOutline,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Faculty & School Announcements',
+                          style: TextStyle(
+                            color: AppTheme.textWhite,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Icon(Icons.campaign_rounded, color: AppTheme.brandGreen, size: 22),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(28.0),
+                          child: CircularProgressIndicator(color: AppTheme.brandGreen),
+                        ),
+                      )
+                    else if (!snapshot.hasData || snapshot.data!.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryBackground,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.borderOutline),
+                        ),
+                        child: const Center(
+                          child: Text(
+                            'No active school broadcasts at this time.',
+                            style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                          ),
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: snapshot.data!.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final item = snapshot.data![index];
+                            final title = item['title']?.toString() ?? 'Announcement';
+                            final subtitle = item['subtitle']?.toString() ?? '';
+                            final target = item['cta_label']?.toString() ?? 'All Faculty';
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryBackground,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppTheme.borderOutline),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          title,
+                                          style: const TextStyle(
+                                            color: AppTheme.textWhite,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.brandGreen.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          target,
+                                          style: const TextStyle(
+                                            color: AppTheme.brandGreen,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (subtitle.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      subtitle,
+                                      style: const TextStyle(
+                                        color: AppTheme.textMuted,
+                                        fontSize: 12.5,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildNextClassCard(BuildContext context) {
+    if (classes.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.borderOutline, width: 1),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.brandGreen.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.event_available_rounded, color: AppTheme.brandGreen, size: 28),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'No Classes Scheduled Today',
+                    style: TextStyle(color: AppTheme.textWhite, fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'All scheduled sessions for today are complete or unassigned.',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     // Find active or next upcoming class
     final nextClass = classes.firstWhere(
       (c) => c.isLiveNow || c.attendance == AttendanceState.unmarked,
@@ -392,15 +718,19 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 ),
               ),
               const SizedBox(width: 10),
-              OutlinedButton(
+              OutlinedButton.icon(
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Opening Studio Log for ${nextClass.studentName}...'),
-                    ),
+                  StudentCommunicationSheet.show(
+                    context,
+                    studentName: nextClass.studentName,
+                    studentId: nextClass.studentId,
+                    studentPhone: nextClass.studentPhone,
+                    studentEmail: nextClass.studentEmail,
+                    courseName: nextClass.courseName,
                   );
                 },
-                child: const Text('Studio Log'),
+                icon: const Icon(Icons.send_rounded, size: 14, color: AppTheme.brandGreen),
+                label: const Text('Notify Student'),
               ),
             ],
           ),
@@ -668,12 +998,28 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               ),
             ),
           ),
+          const SizedBox(width: 6),
+          IconButton(
+            icon: const Icon(Icons.send_rounded, size: 16, color: AppTheme.brandGreen),
+            tooltip: 'Notify ${item.studentName}',
+            onPressed: () {
+              StudentCommunicationSheet.show(
+                context,
+                studentName: item.studentName,
+                studentId: item.studentId,
+                studentPhone: item.studentPhone,
+                studentEmail: item.studentEmail,
+                courseName: item.courseName,
+              );
+            },
+          ),
         ],
       ),
     );
   }
 
   Widget _buildSubmissionsTeaser(BuildContext context) {
+    final pendingCount = _stats['pendingReviews'] ?? 0;
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
@@ -703,9 +1049,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   color: AppTheme.brandGold.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  '7 Pending',
-                  style: TextStyle(
+                child: Text(
+                  '$pendingCount Pending',
+                  style: const TextStyle(
                     color: AppTheme.brandGold,
                     fontSize: 11,
                     fontWeight: FontWeight.w800,

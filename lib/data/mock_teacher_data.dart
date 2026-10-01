@@ -3,6 +3,7 @@
 library;
 
 class TeacherProfile {
+  final String id;
   final String name;
   final String title;
   final String facultyId;
@@ -12,8 +13,13 @@ class TeacherProfile {
   final String studio;
   final String status;
   final String avatarInitials;
+  final double hourlyRate;
+  final double rating;
+  final List<String> instruments;
+  final List<String> availableDays;
 
   const TeacherProfile({
+    this.id = '',
     required this.name,
     required this.title,
     required this.facultyId,
@@ -23,6 +29,10 @@ class TeacherProfile {
     required this.studio,
     required this.status,
     required this.avatarInitials,
+    this.hourlyRate = 1500.0,
+    this.rating = 5.0,
+    this.instruments = const ['Contemporary Jazz Piano', 'Keyboards'],
+    this.availableDays = const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
   });
 }
 
@@ -53,9 +63,12 @@ class TeacherClass {
   final String level;
   final String studentName;
   final String studentId;
+  final String studentPhone;
+  final String studentEmail;
   final String timeSlot;
   final String studio;
   final String topic;
+  String notes;
   AttendanceState attendance;
   final bool isLiveNow;
 
@@ -65,9 +78,12 @@ class TeacherClass {
     required this.level,
     required this.studentName,
     required this.studentId,
+    this.studentPhone = '',
+    this.studentEmail = '',
     required this.timeSlot,
     required this.studio,
     required this.topic,
+    this.notes = '',
     this.attendance = AttendanceState.unmarked,
     this.isLiveNow = false,
   });
@@ -79,6 +95,8 @@ class StudentRosterItem {
   final String studentId;
   final String course;
   final String instrument;
+  final String phone;
+  final String email;
   final double progressPercent;
   final int attendancePercent;
   final int completedLessons;
@@ -91,12 +109,17 @@ class StudentRosterItem {
     required this.studentId,
     required this.course,
     required this.instrument,
+    this.phone = '',
+    this.email = '',
     required this.progressPercent,
     required this.attendancePercent,
     required this.completedLessons,
     required this.nextClass,
     required this.lastLessonNote,
   });
+
+  String get studentPhone => phone;
+  String get studentEmail => email;
 }
 
 class StudentSubmission {

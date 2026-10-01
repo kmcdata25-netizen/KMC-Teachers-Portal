@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../data/mock_teacher_data.dart';
+import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/student_communication_sheet.dart';
 
 class TeacherScheduleScreen extends StatefulWidget {
   const TeacherScheduleScreen({super.key});
@@ -10,103 +12,184 @@ class TeacherScheduleScreen extends StatefulWidget {
 }
 
 class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
-  int _selectedDayIndex = 2; // Default to Wednesday
+  int _selectedDayIndex = 0;
   String _selectedStudioFilter = 'All Studios';
-  final List<TeacherClass> _classList = MockTeacherData.todaySchedule;
+  List<TeacherClass> _classList = [];
+  bool _isLoading = true;
+  late List<DateTime> _weekDays;
+  TeacherProfile? _teacher;
 
-  final List<Map<String, String>> _days = [
-    {'day': 'Mon', 'date': '24'},
-    {'day': 'Tue', 'date': '25'},
-    {'day': 'Wed', 'date': '26'},
-    {'day': 'Thu', 'date': '27'},
-    {'day': 'Fri', 'date': '28'},
-    {'day': 'Sat', 'date': '29'},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _initWeek();
+    _loadTeacherAndSchedule();
+  }
 
-  final List<String> _studioFilters = [
-    'All Studios',
-    'Studio 3',
-    'Sound Lab 1',
-    'Live Hall',
-  ];
+  void _initWeek() {
+    final now = DateTime.now();
+    // Start from Monday of current week
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    _weekDays = List.generate(7, (i) => DateTime(monday.year, monday.month, monday.day + i));
+    _selectedDayIndex = (now.weekday - 1).clamp(0, 6);
+  }
+
+  Future<void> _loadTeacherAndSchedule() async {
+    setState(() => _isLoading = true);
+    _teacher = TeacherSupabaseService.instance.activeTeacher;
+    _teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
+    _teacher ??= MockTeacherData.currentTeacher;
+
+    await _fetchScheduleForDate(_weekDays[_selectedDayIndex]);
+  }
+
+  Future<void> _fetchScheduleForDate(DateTime date) async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final schedule = await TeacherSupabaseService.instance.fetchTeacherSchedule(_teacher!, date);
+      if (mounted) {
+        setState(() {
+          _classList = schedule;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _classList = [];
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  List<String> get _studioFilters {
+    final studios = <String>{'All Studios'};
+    for (final c in _classList) {
+      if (c.studio.isNotEmpty) {
+        studios.add(c.studio);
+      }
+    }
+    return studios.toList();
+  }
 
   void _showAddNoteDialog(TeacherClass item) {
-    final noteController = TextEditingController();
+    final noteController = TextEditingController(text: item.notes);
+    bool isSaving = false;
+
     showDialog(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppTheme.surfaceCard,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: AppTheme.borderOutline, width: 1),
-          ),
-          title: Text(
-            'Lesson Note for ${item.studentName}',
-            style: const TextStyle(
-              color: AppTheme.textWhite,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Course: ${item.courseName}',
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppTheme.surfaceCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: AppTheme.borderOutline, width: 1),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: noteController,
-                maxLines: 4,
-                style: const TextStyle(color: AppTheme.textWhite, fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: 'e.g. Worked on thumb-tuck technique. Practice exercise 4 at 70 BPM with metronome.',
-                  hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  filled: true,
-                  fillColor: AppTheme.surfaceElevated,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppTheme.borderOutline),
-                  ),
+              title: Text(
+                'Lesson Note for ${item.studentName}',
+                style: const TextStyle(
+                  color: AppTheme.textWhite,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Lesson note saved to ${item.studentName}\'s record.'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Course: ${item.courseName}',
+                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                   ),
-                );
-              },
-              child: const Text('Save Note'),
-            ),
-          ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: noteController,
+                    maxLines: 4,
+                    style: const TextStyle(color: AppTheme.textWhite, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. Worked on thumb-tuck technique. Practice exercise 4 at 70 BPM with metronome.',
+                      hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                      filled: true,
+                      fillColor: AppTheme.surfaceElevated,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: AppTheme.borderOutline),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+                ),
+                FilledButton(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          setDialogState(() => isSaving = true);
+                          final messenger = ScaffoldMessenger.of(context);
+                          final noteText = noteController.text.trim();
+                          final success = await TeacherSupabaseService.instance.saveSessionNote(item.id, noteText);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            setState(() {
+                              item.notes = noteText;
+                            });
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  success
+                                      ? '✓ Lesson note saved to Central Mind database.'
+                                      : 'Note cached locally.',
+                                ),
+                                backgroundColor: AppTheme.brandGreen,
+                              ),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Save Note'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
-  void _setAttendance(TeacherClass item, AttendanceState state) {
+  Future<void> _setAttendance(TeacherClass item, AttendanceState state) async {
     setState(() {
       item.attendance = state;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${item.studentName} marked ${state.name.toUpperCase()}'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+
+    final success = await TeacherSupabaseService.instance.updateSessionAttendance(item.id, state);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+              ? '✓ ${item.studentName} marked ${state.name.toUpperCase()} (Synced with Central Mind)'
+              : '${item.studentName} marked ${state.name.toUpperCase()}',
+          ),
+          backgroundColor: AppTheme.brandGreen,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   @override
@@ -121,9 +204,14 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
         title: const Text('Teacher Timetable'),
         actions: [
           IconButton(
+            onPressed: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh Schedule',
+          ),
+          IconButton(
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('KMC Studio Availability: All studios booked.')),
+                const SnackBar(content: Text('KMC Live Timetable connected directly to Central Mind.')),
               );
             },
             icon: const Icon(Icons.info_outline_rounded),
@@ -141,23 +229,45 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
 
           const Divider(color: AppTheme.borderOutline, height: 1),
 
+          if (_isLoading)
+            const LinearProgressIndicator(
+              color: AppTheme.brandGreen,
+              backgroundColor: AppTheme.surfaceElevated,
+            ),
+
           // Schedule List
           Expanded(
-            child: filteredClasses.isEmpty
+            child: _isLoading
                 ? const Center(
-                    child: Text(
-                      'No classes scheduled for this studio.',
-                      style: TextStyle(color: AppTheme.textMuted),
-                    ),
+                    child: CircularProgressIndicator(color: AppTheme.brandGreen),
                   )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredClasses.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 14),
-                    itemBuilder: (context, index) {
-                      return _buildClassCard(filteredClasses[index]);
-                    },
-                  ),
+                : filteredClasses.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.event_note_rounded, size: 48, color: AppTheme.textMuted),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No sessions scheduled for ${_getDayName(_weekDays[_selectedDayIndex].weekday)}, ${_weekDays[_selectedDayIndex].day}/${_weekDays[_selectedDayIndex].month}.',
+                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 14),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Studio rooms are open for faculty practice.',
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: filteredClasses.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 14),
+                        itemBuilder: (context, index) {
+                          return _buildClassCard(filteredClasses[index]);
+                        },
+                      ),
           ),
         ],
       ),
@@ -182,25 +292,49 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
     );
   }
 
+  String _getDayName(int weekday) {
+    switch (weekday) {
+      case 1:
+        return 'Mon';
+      case 2:
+        return 'Tue';
+      case 3:
+        return 'Wed';
+      case 4:
+        return 'Thu';
+      case 5:
+        return 'Fri';
+      case 6:
+        return 'Sat';
+      case 7:
+        return 'Sun';
+      default:
+        return '';
+    }
+  }
+
   Widget _buildDaySelector() {
     return Container(
       color: AppTheme.surfaceCard,
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: List.generate(_days.length, (index) {
+        children: List.generate(_weekDays.length, (index) {
           final isSelected = index == _selectedDayIndex;
-          final d = _days[index];
+          final d = _weekDays[index];
+          final dayName = _getDayName(d.weekday);
+          final dayNum = '${d.day}';
 
           return InkWell(
             onTap: () {
               setState(() {
                 _selectedDayIndex = index;
               });
+              _fetchScheduleForDate(d);
             },
             borderRadius: BorderRadius.circular(10),
             child: Container(
-              width: 50,
+              width: 44,
               padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
                 color: isSelected ? AppTheme.brandGreen : Colors.transparent,
@@ -212,7 +346,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
               child: Column(
                 children: [
                   Text(
-                    d['day']!,
+                    dayName,
                     style: TextStyle(
                       color: isSelected ? AppTheme.primaryBackground : AppTheme.textMuted,
                       fontSize: 11,
@@ -221,10 +355,10 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    d['date']!,
+                    dayNum,
                     style: TextStyle(
                       color: isSelected ? AppTheme.primaryBackground : AppTheme.textWhite,
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -238,13 +372,14 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
   }
 
   Widget _buildFilterChips() {
+    final filters = _studioFilters;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       color: AppTheme.primaryBackground,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: _studioFilters.map((studio) {
+          children: filters.map((studio) {
             final isSelected = _selectedStudioFilter == studio;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -331,21 +466,46 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
           const SizedBox(height: 10),
 
           // Course and Student
-          Text(
-            item.courseName,
-            style: const TextStyle(
-              color: AppTheme.textWhite,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${item.studentName} • ${item.studentId} • ${item.level}',
-            style: const TextStyle(
-              color: AppTheme.textMuted,
-              fontSize: 12,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.courseName,
+                      style: const TextStyle(
+                        color: AppTheme.textWhite,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${item.studentName} • ${item.studentId} • ${item.level}',
+                      style: const TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                icon: const Icon(Icons.send_rounded, size: 16, color: AppTheme.brandGreen),
+                tooltip: 'Notify / Message Student',
+                onPressed: () {
+                  StudentCommunicationSheet.show(
+                    context,
+                    studentName: item.studentName,
+                    studentId: item.studentId,
+                    studentPhone: item.studentPhone,
+                    studentEmail: item.studentEmail,
+                    courseName: item.courseName,
+                  );
+                },
+              ),
+            ],
           ),
           const SizedBox(height: 8),
 
@@ -365,6 +525,31 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
               ),
             ),
           ),
+          if (item.notes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceElevated.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppTheme.brandGreen.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.sticky_note_2_rounded, size: 14, color: AppTheme.brandGreen),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Note: ${item.notes}',
+                      style: const TextStyle(color: AppTheme.textWhite, fontSize: 11.5, fontStyle: FontStyle.italic),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
 
           // Attendance Selector Segment
@@ -395,7 +580,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                 child: OutlinedButton.icon(
                   onPressed: () => _showAddNoteDialog(item),
                   icon: const Icon(Icons.note_alt_outlined, size: 14),
-                  label: const Text('Add Lesson Note'),
+                  label: Text(item.notes.isEmpty ? 'Add Lesson Note' : 'Edit Note'),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -406,14 +591,17 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Opening live lesson session for ${item.studentName}...'),
-                      ),
+                    StudentCommunicationSheet.show(
+                      context,
+                      studentName: item.studentName,
+                      studentId: item.studentId,
+                      studentPhone: item.studentPhone,
+                      studentEmail: item.studentEmail,
+                      courseName: item.courseName,
                     );
                   },
-                  icon: const Icon(Icons.play_circle_fill_rounded, size: 14),
-                  label: const Text('Start Lesson'),
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                  label: const Text('Message Student'),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 10),

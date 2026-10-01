@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../data/mock_teacher_data.dart';
+import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/student_communication_sheet.dart';
 
 class TeacherSubmissionsScreen extends StatefulWidget {
   const TeacherSubmissionsScreen({super.key});
@@ -12,12 +14,15 @@ class TeacherSubmissionsScreen extends StatefulWidget {
 class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final List<StudentSubmission> _submissions = MockTeacherData.submissions;
+  List<StudentSubmission> _submissions = [];
+  bool _isLoading = true;
+  TeacherProfile? _teacher;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadSubmissions();
   }
 
   @override
@@ -26,12 +31,37 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
     super.dispose();
   }
 
+  Future<void> _loadSubmissions() async {
+    setState(() => _isLoading = true);
+    _teacher = TeacherSupabaseService.instance.activeTeacher;
+    _teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
+    _teacher ??= MockTeacherData.currentTeacher;
+
+    try {
+      final list = await TeacherSupabaseService.instance.fetchStudentSubmissions(_teacher!);
+      if (mounted) {
+        setState(() {
+          _submissions = list;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _submissions = MockTeacherData.submissions;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   void _showEvaluationSheet(StudentSubmission sub) {
     double rhythmRating = sub.rating ?? 4.0;
     double techniqueRating = sub.rating ?? 4.5;
     double phrasingRating = sub.rating ?? 4.0;
     final feedbackController = TextEditingController(text: sub.teacherFeedback ?? '');
     bool isPlaying = false;
+    bool isSubmitting = false;
 
     showModalBottomSheet(
       context: context,
@@ -259,26 +289,60 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
 
                     // Submit Feedback Button
                     FilledButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          sub.isReviewed = true;
-                          sub.rating = ((rhythmRating + techniqueRating + phrasingRating) / 3 * 10).round() / 10;
-                          sub.teacherFeedback = feedbackController.text.trim().isEmpty
-                              ? 'Drill verified and approved with score ${sub.rating}/5.0.'
-                              : feedbackController.text.trim();
-                        });
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Drill approved for ${sub.studentName}! Notification dispatched.'),
-                            backgroundColor: AppTheme.brandGreenDark,
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.check_circle_rounded, size: 18),
-                      label: const Text('Approve Drill & Send Feedback'),
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              setSheetState(() => isSubmitting = true);
+                              final calculatedRating = ((rhythmRating + techniqueRating + phrasingRating) / 3 * 10).round() / 10;
+                              final feedback = feedbackController.text.trim().isEmpty
+                                  ? 'Drill verified and approved with score $calculatedRating/5.0.'
+                                  : feedbackController.text.trim();
+
+                              final messenger = ScaffoldMessenger.of(context);
+                              final success = await TeacherSupabaseService.instance.submitDrillReview(
+                                submissionId: sub.id,
+                                rating: calculatedRating,
+                                feedback: feedback,
+                              );
+
+                              // Also send student a Central Mind notification
+                              await TeacherSupabaseService.instance.sendStudentNotification(
+                                studentId: sub.studentId,
+                                title: 'Practice Drill Evaluated: ${sub.drillTitle}',
+                                message: 'Your instructor scored this drill $calculatedRating/5.0. Notes: $feedback',
+                              );
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (mounted) {
+                                setState(() {
+                                  sub.isReviewed = true;
+                                  sub.rating = calculatedRating;
+                                  sub.teacherFeedback = feedback;
+                                });
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      success
+                                          ? '✓ Evaluation saved to Central Mind! Notification dispatched to ${sub.studentName}.'
+                                          : 'Evaluation recorded for ${sub.studentName}.',
+                                    ),
+                                    backgroundColor: AppTheme.brandGreen,
+                                  ),
+                                );
+                              }
+                            },
+                      icon: isSubmitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.check_circle_rounded, size: 18),
+                      label: Text(isSubmitting ? 'Saving to Central Mind...' : 'Approve Drill & Send Feedback'),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size(double.infinity, 46),
+                        backgroundColor: AppTheme.brandGreen,
+                        foregroundColor: AppTheme.primaryBackground,
                       ),
                     ),
                   ],
@@ -334,6 +398,13 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
       backgroundColor: AppTheme.primaryBackground,
       appBar: AppBar(
         title: const Text('Student Submissions'),
+        actions: [
+          IconButton(
+            onPressed: _loadSubmissions,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh Submissions',
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: [
@@ -342,13 +413,15 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildSubmissionList(pending, isPending: true),
-          _buildSubmissionList(reviewed, isPending: false),
-        ],
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.brandGreen))
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildSubmissionList(pending, isPending: true),
+                _buildSubmissionList(reviewed, isPending: false),
+              ],
+            ),
     );
   }
 
@@ -368,19 +441,28 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
               isPending ? 'All caught up! No pending submissions.' : 'No reviewed drills yet.',
               style: const TextStyle(color: AppTheme.textMuted, fontSize: 14),
             ),
+            const SizedBox(height: 6),
+            TextButton(
+              onPressed: _loadSubmissions,
+              child: const Text('Refresh from Central Mind', style: TextStyle(color: AppTheme.brandGreen)),
+            ),
           ],
         ),
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: list.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final sub = list[index];
-        return _buildSubmissionCard(sub, isPending: isPending);
-      },
+    return RefreshIndicator(
+      onRefresh: _loadSubmissions,
+      color: AppTheme.brandGreen,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: list.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          final sub = list[index];
+          return _buildSubmissionCard(sub, isPending: isPending);
+        },
+      ),
     );
   }
 
@@ -465,6 +547,19 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.send_rounded, size: 16, color: AppTheme.brandGreen),
+                tooltip: 'Message ${sub.studentName}',
+                onPressed: () {
+                  StudentCommunicationSheet.show(
+                    context,
+                    studentName: sub.studentName,
+                    studentId: sub.studentId,
+                    courseName: sub.courseTitle,
+                  );
+                },
               ),
             ],
           ),

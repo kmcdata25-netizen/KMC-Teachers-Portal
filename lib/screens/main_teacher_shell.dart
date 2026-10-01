@@ -4,7 +4,10 @@ import 'teacher_schedule_screen.dart';
 import 'teacher_students_screen.dart';
 import 'teacher_submissions_screen.dart';
 import 'teacher_profile_screen.dart';
+import '../services/teacher_supabase_service.dart';
+import '../services/teacher_update_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/teacher_update_dialog.dart';
 
 class MainTeacherShell extends StatefulWidget {
   final int initialTabIndex;
@@ -20,11 +23,41 @@ class MainTeacherShell extends StatefulWidget {
 
 class _MainTeacherShellState extends State<MainTeacherShell> {
   late int _currentIndex;
+  int _pendingReviewsCount = 0;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialTabIndex;
+    _checkPendingReviews();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForUpdates();
+    });
+  }
+
+  Future<void> _checkForUpdates() async {
+    try {
+      await TeacherUpdateService.instance.promptInstallPermissionOnFirstLaunch(context);
+      final update = await TeacherUpdateService.instance.checkForUpdate();
+      if (update != null && update.hasUpdate && mounted) {
+        TeacherUpdateDialog.show(context, update);
+      }
+    } catch (e) {
+      debugPrint('[TeacherShell] Update check notice: $e');
+    }
+  }
+
+  Future<void> _checkPendingReviews() async {
+    final teacher = TeacherSupabaseService.instance.activeTeacher ??
+        await TeacherSupabaseService.instance.checkSavedSession();
+    if (teacher != null) {
+      final stats = await TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
+      if (mounted) {
+        setState(() {
+          _pendingReviewsCount = stats['pendingReviews'] as int? ?? 0;
+        });
+      }
+    }
   }
 
   void _onTabSelected(int index) {
@@ -37,6 +70,9 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
 
   @override
   Widget build(BuildContext context) {
+    final activeTeacher = TeacherSupabaseService.instance.activeTeacher;
+    final initials = activeTeacher?.avatarInitials ?? 'FC';
+
     final List<Widget> screens = [
       TeacherDashboardScreen(onNavigateTab: _onTabSelected),
       const TeacherScheduleScreen(),
@@ -77,9 +113,9 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
                         color: AppTheme.brandGreen.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text(
-                        'FACULTY PORTAL',
-                        style: TextStyle(
+                      child: Text(
+                        activeTeacher != null ? 'FACULTY: ${activeTeacher.name.split(' ').first.toUpperCase()}' : 'FACULTY PORTAL',
+                        style: const TextStyle(
                           color: AppTheme.brandGreen,
                           fontSize: 9,
                           fontWeight: FontWeight.w800,
@@ -96,10 +132,11 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
         actions: [
           IconButton(
             tooltip: 'Faculty Profile & Settings',
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const TeacherProfileScreen()),
               );
+              if (mounted) setState(() {});
             },
             icon: Container(
               padding: const EdgeInsets.all(2),
@@ -107,12 +144,12 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppTheme.brandGreen, width: 1.5),
               ),
-              child: const CircleAvatar(
+              child: CircleAvatar(
                 radius: 12,
                 backgroundColor: AppTheme.surfaceElevated,
                 child: Text(
-                  'DO',
-                  style: TextStyle(
+                  initials,
+                  style: const TextStyle(
                     color: AppTheme.textWhite,
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
@@ -131,35 +168,39 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: _onTabSelected,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard_rounded),
             label: 'Dashboard',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),
             selectedIcon: Icon(Icons.calendar_month_rounded),
             label: 'Schedule',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.people_outline_rounded),
             selectedIcon: Icon(Icons.people_rounded),
             label: 'Students',
           ),
           NavigationDestination(
-            icon: Badge(
-              label: Text('7'),
-              backgroundColor: AppTheme.brandGold,
-              textColor: AppTheme.primaryBackground,
-              child: Icon(Icons.rate_review_outlined),
-            ),
-            selectedIcon: Badge(
-              label: Text('7'),
-              backgroundColor: AppTheme.brandGold,
-              textColor: AppTheme.primaryBackground,
-              child: Icon(Icons.rate_review_rounded),
-            ),
+            icon: _pendingReviewsCount > 0
+                ? Badge(
+                    label: Text('$_pendingReviewsCount'),
+                    backgroundColor: AppTheme.brandGold,
+                    textColor: AppTheme.primaryBackground,
+                    child: const Icon(Icons.rate_review_outlined),
+                  )
+                : const Icon(Icons.rate_review_outlined),
+            selectedIcon: _pendingReviewsCount > 0
+                ? Badge(
+                    label: Text('$_pendingReviewsCount'),
+                    backgroundColor: AppTheme.brandGold,
+                    textColor: AppTheme.primaryBackground,
+                    child: const Icon(Icons.rate_review_rounded),
+                  )
+                : const Icon(Icons.rate_review_rounded),
             label: 'Reviews',
           ),
         ],
