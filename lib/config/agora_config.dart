@@ -1,20 +1,36 @@
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Central Configuration for Kasarani Music Center Native Agora RTC Video/Audio Engine.
 /// Powers the Native In-App "KMC Live Music Studio" for faculty masterclasses and student practice.
 class AgoraConfig {
   AgoraConfig._();
 
-  /// Default Agora App ID configured at build time or via environment variable.
-  /// To pass during build: flutter build apk --dart-define=AGORA_APP_ID=your_app_id
   static const String _envAppId = String.fromEnvironment('AGORA_APP_ID', defaultValue: '');
-
-  /// Runtime override if injected via Central Mind / Admin App
+  static const String _prefKey = 'kmc_agora_app_id';
   static String? _runtimeAppId;
 
-  /// Set the active App ID dynamically at runtime
-  static void setAppId(String id) {
-    _runtimeAppId = id.trim();
+  /// Load persisted App ID from local device storage
+  static Future<void> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_prefKey);
+      if (saved != null && saved.isNotEmpty) {
+        _runtimeAppId = saved.trim();
+      }
+    } catch (_) {}
   }
+
+  /// Persist new Agora App ID dynamically at runtime
+  static Future<void> saveAppId(String id) async {
+    _runtimeAppId = id.trim();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefKey, _runtimeAppId!);
+    } catch (_) {}
+  }
+
+  /// Alias for saveAppId
+  static Future<void> setDynamicAppId(String id) => saveAppId(id);
 
   /// Active Agora App ID
   static String get appId {
@@ -26,8 +42,4 @@ class AgoraConfig {
 
   /// Whether an Agora App ID is provided and real-time cloud streaming is active
   static bool get isConfigured => appId.isNotEmpty;
-
-  /// High-Fidelity Music Profile documentation:
-  /// Kasarani Music Center uses 48kHz full-band stereo audio with AI noise suppression
-  /// tuned specifically to preserve acoustic instrument resonance (pianos, violins, guitars, vocal timbre).
 }

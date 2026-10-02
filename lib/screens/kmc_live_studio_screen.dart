@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:camera/camera.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../config/agora_config.dart';
@@ -26,6 +27,13 @@ class KMCLiveStudioScreen extends StatefulWidget {
 
 class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     with SingleTickerProviderStateMixin {
+  // Native Device Camera State
+  List<CameraDescription> _availableCameras = [];
+  CameraController? _cameraController;
+  bool _isCameraInitialized = false;
+  int _selectedCameraIndex = 0;
+  bool _isLocalExpanded = false;
+
   // Agora RTC Engine State
   RtcEngine? _engine;
   bool _isJoined = false;
@@ -103,6 +111,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     super.initState();
     _notesController.text = widget.session.notes;
     _startSessionTimer();
+    _initDeviceCamera();
     _initAgoraAndMedia();
   }
 
@@ -112,6 +121,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _metronomeTimer?.cancel();
     _notesController.dispose();
     _homeworkController.dispose();
+    _cameraController?.dispose();
     _disposeAgora();
     super.dispose();
   }
@@ -133,6 +143,48 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
     final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  // ---------------------------------------------------------------------------
+  // NATIVE DEVICE CAMERA INITIALIZATION
+  // ---------------------------------------------------------------------------
+  Future<void> _initDeviceCamera() async {
+    try {
+      final permissions = await [Permission.camera, Permission.microphone].request();
+      if (permissions[Permission.camera]?.isGranted ?? false) {
+        _availableCameras = await availableCameras();
+        if (_availableCameras.isNotEmpty) {
+          int frontIdx = _availableCameras.indexWhere(
+            (c) => c.lensDirection == CameraLensDirection.front,
+          );
+          _selectedCameraIndex = frontIdx != -1 ? frontIdx : 0;
+          await _startCameraController(_availableCameras[_selectedCameraIndex]);
+        }
+      }
+    } catch (e) {
+      debugPrint('[KMC Studio] Native camera initialization notice: $e');
+    }
+  }
+
+  Future<void> _startCameraController(CameraDescription description) async {
+    await _cameraController?.dispose();
+    _cameraController = CameraController(
+      description,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
+    try {
+      await _cameraController!.initialize();
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+          _isFrontCamera = description.lensDirection == CameraLensDirection.front;
+        });
+      }
+    } catch (e) {
+      debugPrint('[KMC Studio] Camera controller initialize error: $e');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -256,6 +308,17 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     if (_engine != null) {
       await _engine!.muteLocalVideoStream(nextState);
     }
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
+      try {
+        if (nextState) {
+          await _cameraController!.pausePreview();
+        } else {
+          await _cameraController!.resumePreview();
+        }
+      } catch (e) {
+        debugPrint('[KMC Studio] Error pausing/resuming camera preview: $e');
+      }
+    }
     setState(() {
       _isVideoMuted = nextState;
     });
@@ -263,13 +326,22 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   }
 
   Future<void> _switchCamera() async {
+    HapticFeedback.mediumImpact();
+    if (_availableCameras.length > 1) {
+      _selectedCameraIndex = (_selectedCameraIndex + 1) % _availableCameras.length;
+      final nextDesc = _availableCameras[_selectedCameraIndex];
+      await _startCameraController(nextDesc);
+    }
     if (_engine != null) {
-      await _engine!.switchCamera();
+      try {
+        await _engine!.switchCamera();
+      } catch (e) {
+        debugPrint('[KMC Studio] Error switching Agora camera: $e');
+      }
     }
     setState(() {
       _isFrontCamera = !_isFrontCamera;
     });
-    HapticFeedback.mediumImpact();
   }
 
   // ---------------------------------------------------------------------------
@@ -645,6 +717,55 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               ],
             ),
           ),
+          const SizedBox(width: 8),
+
+          // Cloud Live Broadcast Setup / Status Badge
+          InkWell(
+            onTap: _showAgoraSetupModal,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: _isJoined
+                    ? AppTheme.brandGreen.withValues(alpha: 0.2)
+                    : (AgoraConfig.isConfigured
+                        ? AppTheme.accentSky.withValues(alpha: 0.2)
+                        : Colors.amber.withValues(alpha: 0.18)),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isJoined
+                      ? AppTheme.brandGreen
+                      : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _isJoined ? Icons.cloud_done_rounded : Icons.cloud_queue_rounded,
+                    color: _isJoined
+                        ? AppTheme.brandGreen
+                        : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
+                    size: 13,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _isJoined
+                        ? 'Broadcasting'
+                        : (AgoraConfig.isConfigured ? 'Ready to Stream' : 'Live Setup'),
+                    style: TextStyle(
+                      color: _isJoined
+                          ? AppTheme.brandGreen
+                          : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -656,7 +777,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   Widget _buildMainVideoStage() {
     Widget stageContent;
 
-    // If Agora is fully active and a remote student has connected
+    // 1. If Agora is active and a remote student has connected
     if (_isJoined && _engine != null && _remoteUid != null) {
       stageContent = ClipRRect(
         child: AgoraVideoView(
@@ -667,32 +788,34 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
           ),
         ),
       );
-    } else {
-      // Waiting / Coaching Stage: Just the Kasarani Music School logo alone without any other writing
-      stageContent = Container(
-        color: const Color(0xFF070E16),
-        child: Center(
-          child: Image.asset(
-            'Images/logos/kms logo.png',
-            width: 220,
-            fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) {
-              return Image.asset(
-                'Images/logos/kms logo_original.png',
-                width: 220,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return Image.asset(
-                    'Images/logos/kms logo cropped.png',
-                    width: 220,
-                    fit: BoxFit.contain,
-                  );
-                },
-              );
-            },
+    } else if (_isLocalExpanded && !_isVideoMuted) {
+      // 2. Teacher expanded local camera to full main stage
+      if (_isJoined && _engine != null) {
+        stageContent = AgoraVideoView(
+          controller: VideoViewController(
+            rtcEngine: _engine!,
+            canvas: const VideoCanvas(uid: 0),
           ),
-        ),
-      );
+        );
+      } else if (_isCameraInitialized &&
+          _cameraController != null &&
+          _cameraController!.value.isInitialized) {
+        stageContent = SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _cameraController!.value.previewSize?.height ?? 720,
+              height: _cameraController!.value.previewSize?.width ?? 1280,
+              child: CameraPreview(_cameraController!),
+            ),
+          ),
+        );
+      } else {
+        stageContent = _buildLogoAloneWaitingStage();
+      }
+    } else {
+      // 3. Waiting / Coaching Stage: Just the Kasarani Music School logo alone without any other writing
+      stageContent = _buildLogoAloneWaitingStage();
     }
 
     return Stack(
@@ -726,18 +849,106 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     );
   }
 
+  Widget _buildLogoAloneWaitingStage() {
+    return Container(
+      color: const Color(0xFF070E16),
+      child: Center(
+        child: Image.asset(
+          'Images/logos/kms logo.png',
+          width: 220,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Image.asset(
+              'Images/logos/kms logo_original.png',
+              width: 220,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Image.asset(
+                  'Images/logos/kms logo cropped.png',
+                  width: 220,
+                  fit: BoxFit.contain,
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // 3. TEACHER'S FLOATING PIP CARD
   // ---------------------------------------------------------------------------
   Widget _buildTeacherPipCard() {
+    Widget videoWidget;
+    if (_isVideoMuted) {
+      videoWidget = Container(
+        color: const Color(0xFF152636),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.videocam_off_rounded,
+                color: AppTheme.textMuted,
+                size: 26,
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Camera Off',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 9),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (_isJoined && _engine != null) {
+      // Agora live local stream preview
+      videoWidget = AgoraVideoView(
+        controller: VideoViewController(
+          rtcEngine: _engine!,
+          canvas: const VideoCanvas(uid: 0),
+        ),
+      );
+    } else if (_isCameraInitialized &&
+        _cameraController != null &&
+        _cameraController!.value.isInitialized) {
+      // Direct Hardware Camera Preview Feed
+      videoWidget = SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: _cameraController!.value.previewSize?.height ?? 120,
+            height: _cameraController!.value.previewSize?.width ?? 160,
+            child: CameraPreview(_cameraController!),
+          ),
+        ),
+      );
+    } else {
+      // Camera initializing spinner
+      videoWidget = Container(
+        color: const Color(0xFF152636),
+        child: const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.brandGreen),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF111E2B),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.brandGreen.withValues(alpha: 0.6), width: 1.5),
+        border: Border.all(color: AppTheme.brandGreen.withValues(alpha: 0.8), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
+            color: Colors.black.withValues(alpha: 0.6),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -746,39 +957,17 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          // Live Agora local preview if active
-          if (_engine != null && !_isVideoMuted)
-            Positioned.fill(
-              child: AgoraVideoView(
-                controller: VideoViewController(
-                  rtcEngine: _engine!,
-                  canvas: const VideoCanvas(uid: 0),
-                ),
-              ),
-            )
-          else
-            Positioned.fill(
-              child: Container(
-                color: const Color(0xFF152636),
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isVideoMuted ? Icons.videocam_off_rounded : Icons.camera_alt_outlined,
-                        color: AppTheme.textMuted,
-                        size: 26,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _isVideoMuted ? 'Camera Off' : 'Faculty Feed',
-                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 9),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _isLocalExpanded = !_isLocalExpanded;
+                });
+                HapticFeedback.lightImpact();
+              },
+              child: videoWidget,
             ),
+          ),
 
           // Teacher Name Badge
           Positioned(
@@ -811,7 +1000,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
+                  color: Colors.black.withValues(alpha: 0.7),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -822,8 +1011,197 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               ),
             ),
           ),
+
+          // Fullscreen expand/collapse icon
+          Positioned(
+            top: 4,
+            left: 4,
+            child: InkWell(
+              onTap: () {
+                setState(() {
+                  _isLocalExpanded = !_isLocalExpanded;
+                });
+                HapticFeedback.lightImpact();
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _isLocalExpanded ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // AGORA STREAMING SETUP MODAL
+  // ---------------------------------------------------------------------------
+  void _showAgoraSetupModal() {
+    final textController = TextEditingController(text: AgoraConfig.appId);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0F1A24),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.brandGreen.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.cell_tower_rounded, color: AppTheme.brandGreen, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Live Cloud Streaming Setup',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Agora RTC Engine Configuration',
+                          style: TextStyle(
+                            color: AppTheme.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF142433),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF223A4E)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isCameraInitialized ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                      color: _isCameraInitialized ? AppTheme.brandGreen : Colors.amber,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _isCameraInitialized
+                            ? 'Device hardware camera is ACTIVE & streaming preview.'
+                            : 'Device camera initializing...',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Agora App ID (for remote student live-feed)',
+                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: textController,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Enter 32-character Agora App ID',
+                  hintStyle: const TextStyle(color: AppTheme.textMuted),
+                  filled: true,
+                  fillColor: const Color(0xFF070E16),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFF223A4E)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppTheme.brandGreen),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: const BorderSide(color: Color(0xFF2E465E)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.brandGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () async {
+                        final newId = textController.text.trim();
+                        await AgoraConfig.setDynamicAppId(newId);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Agora configuration updated. Connecting...'),
+                              backgroundColor: AppTheme.brandGreenDark,
+                            ),
+                          );
+                          await _disposeAgora();
+                          await _initAgoraAndMedia();
+                        }
+                      },
+                      child: const Text('Save & Connect', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

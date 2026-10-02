@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'config/agora_config.dart';
 import 'config/supabase_config.dart';
 import 'screens/splash_screen.dart';
 import 'services/teacher_notification_service.dart';
@@ -8,6 +9,11 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Agora Configuration
+  try {
+    await AgoraConfig.init();
+  } catch (_) {}
 
   // Initialize Supabase Central Mind connection
   try {
