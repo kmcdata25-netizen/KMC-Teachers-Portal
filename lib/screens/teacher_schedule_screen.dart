@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
@@ -611,7 +612,33 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
-            onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text('Launching Studio Room: ${item.studio}...'),
+                  backgroundColor: AppTheme.brandBlue,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              final ok = await TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio);
+              if (!ok) {
+                final cleanRoom = item.studio
+                    .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
+                    .toLowerCase()
+                    .replaceAll(RegExp(r'_+'), '_')
+                    .replaceAll(RegExp(r'^_|_$'), '');
+                final roomUrl = 'https://meet.jit.si/kmc_masterclass_$cleanRoom';
+                await Clipboard.setData(ClipboardData(text: roomUrl));
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Studio link copied to clipboard: $roomUrl'),
+                    backgroundColor: AppTheme.brandGreen,
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            },
             icon: const Icon(Icons.videocam_rounded, size: 15),
             label: Text(
               item.isLiveNow ? 'Join Studio Video Room (Jitsi Meet)' : 'Open Studio Room: ${item.studio}',
@@ -667,6 +694,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
     StudentRosterItem? selectedStudent = students.isNotEmpty ? students.first : null;
     String selectedStudio = 'Studio 3 (Yamaha C7 Grand)';
     final topicController = TextEditingController(text: 'Repertoire Drill & Technique Coaching');
+    DateTime selectedDate = _weekDays[_selectedDayIndex];
     TimeOfDay selectedTime = const TimeOfDay(hour: 10, minute: 0);
     bool isSaving = false;
 
@@ -755,6 +783,32 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        const Text('Session Date:', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                              lastDate: DateTime.now().add(const Duration(days: 90)),
+                            );
+                            if (picked != null) {
+                              setDlgState(() => selectedDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today_rounded, size: 16, color: AppTheme.brandGreen),
+                          label: Text(
+                            '${_getDayName(selectedDate.weekday)}, ${selectedDate.day}/${selectedDate.month}',
+                            style: const TextStyle(color: AppTheme.brandGreen, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
                         const Text('Session Time:', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                         TextButton.icon(
                           onPressed: () async {
@@ -788,12 +842,10 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                       : () async {
                           setDlgState(() => isSaving = true);
                           final messenger = ScaffoldMessenger.of(context);
-                          final timeStr = selectedTime.format(context);
-                          final currentSelectedDay = _weekDays[_selectedDayIndex];
                           final scheduledDateTime = DateTime(
-                            currentSelectedDay.year,
-                            currentSelectedDay.month,
-                            currentSelectedDay.day,
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
                             selectedTime.hour,
                             selectedTime.minute,
                           );
@@ -810,31 +862,23 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                             topic: topicController.text.trim(),
                           );
 
-                          final newClass = TeacherClass(
-                            id: 'sched_${DateTime.now().millisecondsSinceEpoch}',
-                            courseName: selectedStudent!.course,
-                            level: 'Active Faculty Studio',
-                            studentName: selectedStudent!.name,
-                            studentId: selectedStudent!.studentId,
-                            studentPhone: selectedStudent!.phone,
-                            studentEmail: selectedStudent!.email,
-                            timeSlot: '$timeStr – 1 hour',
-                            studio: selectedStudio,
-                            topic: topicController.text.trim(),
-                            attendance: AttendanceState.unmarked,
-                            isLiveNow: false,
-                          );
-
                           if (ctx.mounted) Navigator.pop(ctx);
                           if (mounted) {
-                            setState(() {
-                              _classList.insert(0, newClass);
-                            });
+                            final matchIdx = _weekDays.indexWhere((wd) =>
+                                wd.year == selectedDate.year &&
+                                wd.month == selectedDate.month &&
+                                wd.day == selectedDate.day);
+                            if (matchIdx != -1) {
+                              setState(() {
+                                _selectedDayIndex = matchIdx;
+                              });
+                            }
+                            await _fetchScheduleForDate(_weekDays[_selectedDayIndex]);
                             messenger.showSnackBar(
                               SnackBar(
                                 content: Text(
                                   success
-                                      ? '✓ Studio session for ${selectedStudent!.name} booked in Central Mind!'
+                                      ? '✓ Studio session for ${selectedStudent!.name} booked for ${_getDayName(selectedDate.weekday)} ${selectedDate.day}/${selectedDate.month}!'
                                       : 'Session scheduled on device.',
                                 ),
                                 backgroundColor: AppTheme.brandGreen,

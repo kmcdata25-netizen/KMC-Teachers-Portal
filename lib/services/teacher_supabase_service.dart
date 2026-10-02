@@ -455,7 +455,6 @@ class TeacherSupabaseService {
       }
 
       final list = res as List;
-      final schedule = <TeacherClass>[];
       final dayMatches = <TeacherClass>[];
 
       for (final row in list) {
@@ -475,9 +474,17 @@ class TeacherSupabaseService {
         if (statusStr == 'completed') state = AttendanceState.present;
         if (statusStr == 'cancelled') state = AttendanceState.absent;
 
-        final timeFormatted = schedAt.contains('T')
-            ? schedAt.split('T')[1].substring(0, 5)
-            : '10:00 AM';
+        final sessionDate = DateTime.tryParse(schedAt)?.toLocal();
+        String timeFormatted = '10:00 AM';
+        if (sessionDate != null) {
+          final hour = sessionDate.hour;
+          final minute = sessionDate.minute.toString().padLeft(2, '0');
+          final period = hour >= 12 ? 'PM' : 'AM';
+          final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+          timeFormatted = '$h12:$minute $period';
+        } else if (schedAt.contains('T')) {
+          timeFormatted = schedAt.split('T')[1].substring(0, 5);
+        }
 
         final tc = TeacherClass(
           id: m['id']?.toString() ?? '',
@@ -487,7 +494,7 @@ class TeacherSupabaseService {
           studentId: studentId,
           studentPhone: prof['phone']?.toString() ?? '',
           studentEmail: prof['email']?.toString() ?? '',
-          timeSlot: '$timeFormatted – ${timeFormatted.contains('10') ? '11:00 AM' : '12:30 PM'}',
+          timeSlot: '$timeFormatted – 1 hour',
           studio: studioRoom,
           topic: notes.isNotEmpty ? notes : 'Technique & Repertoire Drill',
           notes: notes,
@@ -495,23 +502,22 @@ class TeacherSupabaseService {
           isLiveNow: statusStr == 'live',
         );
 
-        schedule.add(tc);
-        if (schedAt.startsWith(dateStr)) {
+        final matchesDay = sessionDate != null
+            ? (sessionDate.year == date.year && sessionDate.month == date.month && sessionDate.day == date.day)
+            : schedAt.startsWith(dateStr);
+
+        if (matchesDay) {
           dayMatches.add(tc);
         }
       }
 
-      if (dayMatches.isNotEmpty) {
-        return dayMatches;
-      }
-      if (schedule.isNotEmpty) {
-        return schedule;
-      }
+      // Return ONLY the sessions that belong to the queried date
+      return dayMatches;
     } catch (e) {
       debugPrint('[TeacherApp] Fetch schedule notice: $e');
     }
 
-    return MockTeacherData.todaySchedule;
+    return [];
   }
 
   /// Mark attendance in Central Mind live_sessions table
@@ -839,17 +845,32 @@ class TeacherSupabaseService {
     final cleanRoom = roomName
         .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
         .toLowerCase()
-        .replaceAll(RegExp(r'_+'), '_');
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
     final roomUrl = 'https://meet.jit.si/kmc_masterclass_$cleanRoom';
     final uri = Uri.parse(roomUrl);
+    debugPrint('[TeacherApp] Launching live studio room: $roomUrl');
+
     try {
-      if (await canLaunchUrl(uri)) {
-        return await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (ok) return true;
     } catch (e) {
-      debugPrint('[TeacherApp] Jitsi launch notice: $e');
+      debugPrint('[TeacherApp] Jitsi externalApplication notice: $e');
     }
-    return false;
+
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (ok) return true;
+    } catch (e) {
+      debugPrint('[TeacherApp] Jitsi platformDefault notice: $e');
+    }
+
+    try {
+      return await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+    } catch (e) {
+      debugPrint('[TeacherApp] Jitsi inAppBrowserView notice: $e');
+      return false;
+    }
   }
 
   /// Schedule a new 1-on-1 Studio Session directly from the Teacher Portal
