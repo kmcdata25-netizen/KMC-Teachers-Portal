@@ -734,19 +734,21 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               ),
             ],
           ),
-          if (nextClass.isLiveNow) ...[
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(nextClass.studio),
-              icon: const Icon(Icons.videocam_rounded, size: 16),
-              label: const Text('Launch Virtual Studio Room (Jitsi Meet)'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.brandBlue,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 38),
-              ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(nextClass.studio),
+            icon: const Icon(Icons.videocam_rounded, size: 16),
+            label: Text(
+              nextClass.isLiveNow
+                  ? 'Join Active Studio Room (Jitsi Meet)'
+                  : 'Open Studio Room: ${nextClass.studio} (Jitsi)',
             ),
-          ],
+            style: FilledButton.styleFrom(
+              backgroundColor: nextClass.isLiveNow ? AppTheme.brandGreen : AppTheme.brandBlue,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 38),
+            ),
+          ),
         ],
       ),
     );

@@ -277,13 +277,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Studio Booking: Request extra practice slot from Administration.'),
-            ),
-          );
-        },
+        onPressed: _showScheduleSessionDialog,
         backgroundColor: AppTheme.brandGreen,
         icon: const Icon(Icons.add_rounded, color: AppTheme.primaryBackground),
         label: const Text(
@@ -615,20 +609,20 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
               ),
             ],
           ),
-          if (item.isLiveNow) ...[
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio),
-              icon: const Icon(Icons.videocam_rounded, size: 15),
-              label: const Text('Join Studio Video Room (Jitsi Meet)'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.brandBlue,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 34),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio),
+            icon: const Icon(Icons.videocam_rounded, size: 15),
+            label: Text(
+              item.isLiveNow ? 'Join Studio Video Room (Jitsi Meet)' : 'Open Studio Room: ${item.studio}',
             ),
-          ],
+            style: FilledButton.styleFrom(
+              backgroundColor: item.isLiveNow ? AppTheme.brandGreen : AppTheme.brandBlue,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+          ),
         ],
       ),
     );

@@ -1,7 +1,7 @@
 name: kmc_teacher_app
 description: Kasarani Music Center Teacher Portal Native Android Application
 publish_to: 'none'
-version: 1.0.3+4
+version: 1.0.4+5
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
