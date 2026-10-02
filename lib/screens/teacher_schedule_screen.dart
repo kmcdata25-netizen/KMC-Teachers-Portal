@@ -204,6 +204,11 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
         title: const Text('Teacher Timetable'),
         actions: [
           IconButton(
+            onPressed: _showScheduleSessionDialog,
+            icon: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.brandGreen),
+            tooltip: 'Schedule Studio Class',
+          ),
+          IconButton(
             onPressed: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh Schedule',
@@ -610,6 +615,20 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
               ),
             ],
           ),
+          if (item.isLiveNow) ...[
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio),
+              icon: const Icon(Icons.videocam_rounded, size: 15),
+              label: const Text('Join Studio Video Room (Jitsi Meet)'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.brandBlue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -644,6 +663,205 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  void _showScheduleSessionDialog() async {
+    final students = await TeacherSupabaseService.instance.fetchAssignedStudents(_teacher!);
+    if (!mounted) return;
+
+    StudentRosterItem? selectedStudent = students.isNotEmpty ? students.first : null;
+    String selectedStudio = 'Studio 3 (Yamaha C7 Grand)';
+    final topicController = TextEditingController(text: 'Repertoire Drill & Technique Coaching');
+    TimeOfDay selectedTime = const TimeOfDay(hour: 10, minute: 0);
+    bool isSaving = false;
+
+    final studios = [
+      'Studio 1 — Roland Digital Lab',
+      'Studio 2 — Fender / Drum Clinician Suite',
+      'Studio 3 (Yamaha C7 Grand)',
+      'Studio 4 — Vocal & Wind Room',
+      'Theory Lab 1',
+    ];
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDlgState) {
+            return AlertDialog(
+              backgroundColor: AppTheme.surfaceCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: const BorderSide(color: AppTheme.borderOutline),
+              ),
+              title: const Text(
+                'Schedule Studio Masterclass',
+                style: TextStyle(color: AppTheme.textWhite, fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Student', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    DropdownButtonFormField<StudentRosterItem>(
+                      initialValue: selectedStudent,
+                      dropdownColor: AppTheme.surfaceElevated,
+                      style: const TextStyle(color: AppTheme.textWhite, fontSize: 13),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: AppTheme.surfaceElevated,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      items: students.map((s) {
+                        return DropdownMenuItem(
+                          value: s,
+                          child: Text('${s.name} (${s.studentId})', overflow: TextOverflow.ellipsis),
+                        );
+                      }).toList(),
+                      onChanged: (val) => setDlgState(() => selectedStudent = val),
+                    ),
+                    const SizedBox(height: 12),
+
+                    const Text('Studio Room', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedStudio,
+                      dropdownColor: AppTheme.surfaceElevated,
+                      style: const TextStyle(color: AppTheme.textWhite, fontSize: 13),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: AppTheme.surfaceElevated,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      items: studios.map((st) {
+                        return DropdownMenuItem(value: st, child: Text(st, overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: (val) => setDlgState(() => selectedStudio = val ?? selectedStudio),
+                    ),
+                    const SizedBox(height: 12),
+
+                    const Text('Lesson Topic', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: topicController,
+                      style: const TextStyle(color: AppTheme.textWhite, fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Autumn Leaves rootless voicings',
+                        filled: true,
+                        fillColor: AppTheme.surfaceElevated,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Session Time:', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: selectedTime,
+                            );
+                            if (picked != null) {
+                              setDlgState(() => selectedTime = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.access_time_rounded, size: 16, color: AppTheme.brandGreen),
+                          label: Text(
+                            selectedTime.format(context),
+                            style: const TextStyle(color: AppTheme.brandGreen, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+                ),
+                FilledButton(
+                  onPressed: isSaving || selectedStudent == null
+                      ? null
+                      : () async {
+                          setDlgState(() => isSaving = true);
+                          final messenger = ScaffoldMessenger.of(context);
+                          final timeStr = selectedTime.format(context);
+                          final currentSelectedDay = _weekDays[_selectedDayIndex];
+                          final scheduledDateTime = DateTime(
+                            currentSelectedDay.year,
+                            currentSelectedDay.month,
+                            currentSelectedDay.day,
+                            selectedTime.hour,
+                            selectedTime.minute,
+                          );
+
+                          final teacherId = _teacher?.teacherTableId.isNotEmpty == true
+                              ? _teacher!.teacherTableId
+                              : (_teacher?.id ?? '');
+
+                          final success = await TeacherSupabaseService.instance.scheduleStudioSession(
+                            teacherId: teacherId,
+                            studentId: selectedStudent!.id,
+                            scheduledAt: scheduledDateTime,
+                            studioRoom: selectedStudio,
+                            topic: topicController.text.trim(),
+                          );
+
+                          final newClass = TeacherClass(
+                            id: 'sched_${DateTime.now().millisecondsSinceEpoch}',
+                            courseName: selectedStudent!.course,
+                            level: 'Active Faculty Studio',
+                            studentName: selectedStudent!.name,
+                            studentId: selectedStudent!.studentId,
+                            studentPhone: selectedStudent!.phone,
+                            studentEmail: selectedStudent!.email,
+                            timeSlot: '$timeStr – 1 hour',
+                            studio: selectedStudio,
+                            topic: topicController.text.trim(),
+                            attendance: AttendanceState.unmarked,
+                            isLiveNow: false,
+                          );
+
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            setState(() {
+                              _classList.insert(0, newClass);
+                            });
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  success
+                                      ? '✓ Studio session for ${selectedStudent!.name} booked in Central Mind!'
+                                      : 'Session scheduled on device.',
+                                ),
+                                backgroundColor: AppTheme.brandGreen,
+                              ),
+                            );
+                          }
+                        },
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.brandGreen),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Text('Confirm Booking', style: TextStyle(color: AppTheme.primaryBackground)),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import 'main_teacher_shell.dart';
@@ -18,6 +19,22 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmail();
+  }
+
+  Future<void> _loadSavedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('kmc_logged_in_teacher_email');
+    if (savedEmail != null && savedEmail.isNotEmpty && mounted) {
+      setState(() {
+        _identifierController.text = savedEmail;
+      });
+    }
+  }
 
   @override
   void dispose() {

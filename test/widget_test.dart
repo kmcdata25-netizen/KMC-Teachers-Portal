@@ -9,5 +9,8 @@ void main() {
     // Verify splash screen branding exists
     expect(find.text('KASARANI MUSIC CENTER'), findsOneWidget);
     expect(find.text('TEACHER & FACULTY PORTAL'), findsOneWidget);
+
+    // Advance beyond the splash timer to clean up pending timers
+    await tester.pump(const Duration(milliseconds: 4500));
   });
 }

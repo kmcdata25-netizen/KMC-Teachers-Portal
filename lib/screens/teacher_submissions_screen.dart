@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/practice_drill_media_player.dart';
 import '../widgets/student_communication_sheet.dart';
 
 class TeacherSubmissionsScreen extends StatefulWidget {
@@ -60,7 +61,6 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
     double techniqueRating = sub.rating ?? 4.5;
     double phrasingRating = sub.rating ?? 4.0;
     final feedbackController = TextEditingController(text: sub.teacherFeedback ?? '');
-    bool isPlaying = false;
     bool isSubmitting = false;
 
     showModalBottomSheet(
@@ -115,105 +115,12 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
                     ),
                     const SizedBox(height: 16),
 
-                    // Media Player Mockup Container
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryBackground,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.borderOutline),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.surfaceElevated,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: AppTheme.brandGreen),
-                                ),
-                                child: IconButton(
-                                  icon: Icon(
-                                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                    color: AppTheme.brandGreen,
-                                  ),
-                                  onPressed: () {
-                                    setSheetState(() {
-                                      isPlaying = !isPlaying;
-                                    });
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      sub.drillTitle,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AppTheme.textWhite,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        Text(
-                                          isPlaying ? '00:34' : '00:00',
-                                          style: const TextStyle(
-                                            color: AppTheme.brandGreen,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const Text(' / ', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                                        Text(
-                                          sub.durationText,
-                                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                                        ),
-                                        const Spacer(),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.surfaceElevated,
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            sub.mediaType.toUpperCase(),
-                                            style: const TextStyle(
-                                              color: AppTheme.brandGold,
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(3),
-                            child: LinearProgressIndicator(
-                              value: isPlaying ? 0.45 : 0.0,
-                              minHeight: 4,
-                              backgroundColor: AppTheme.surfaceElevated,
-                              valueColor: const AlwaysStoppedAnimation(AppTheme.brandGreen),
-                            ),
-                          ),
-                        ],
-                      ),
+                    // Real Practice Drill Media Player (Video / Audio / Score)
+                    PracticeDrillMediaPlayer(
+                      mediaUrl: sub.mediaUrl,
+                      mediaType: sub.mediaType,
+                      drillTitle: sub.drillTitle,
+                      durationText: sub.durationText,
                     ),
                     const SizedBox(height: 16),
 
@@ -294,9 +201,10 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
                           : () async {
                               setSheetState(() => isSubmitting = true);
                               final calculatedRating = ((rhythmRating + techniqueRating + phrasingRating) / 3 * 10).round() / 10;
+                              final rubricNote = 'Rubric: Rhythm ${rhythmRating.toStringAsFixed(1)}/5, Technique ${techniqueRating.toStringAsFixed(1)}/5, Expression ${phrasingRating.toStringAsFixed(1)}/5 (Overall: ${calculatedRating.toStringAsFixed(1)}/5)';
                               final feedback = feedbackController.text.trim().isEmpty
-                                  ? 'Drill verified and approved with score $calculatedRating/5.0.'
-                                  : feedbackController.text.trim();
+                                  ? '$rubricNote. Approved by instructor.'
+                                  : '$rubricNote — ${feedbackController.text.trim()}';
 
                               final messenger = ScaffoldMessenger.of(context);
                               final success = await TeacherSupabaseService.instance.submitDrillReview(

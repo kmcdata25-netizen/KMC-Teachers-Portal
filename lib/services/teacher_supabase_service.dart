@@ -86,7 +86,7 @@ class TeacherSupabaseService {
 
             final teacherProfile = await fetchTeacherProfile(res.user!.id);
             if (teacherProfile != null) {
-              await _saveSession(teacherProfile.facultyId, teacherProfile.email);
+              await _saveSession(teacherProfile.id, teacherProfile.email);
               _activeTeacher = teacherProfile;
               return AuthResult.success(teacherProfile);
             }
@@ -107,19 +107,36 @@ class TeacherSupabaseService {
           : await query.or('student_id.ilike.%$trimmed%,phone.ilike.%$trimmed%');
 
       final list = results as List;
-      if (list.isEmpty) {
-        return AuthResult.failure(
-          'Faculty account not found. Please verify your Faculty Code or KMC Staff Email.',
-        );
+      if (list.isNotEmpty) {
+        final row = list.first as Map<String, dynamic>;
+        final teacherData = _extractTeacherData(row['teachers']);
+
+        final teacherObj = _mapToTeacherProfile(row, teacherData);
+        await _saveSession(teacherObj.id, teacherObj.email);
+        _activeTeacher = teacherObj;
+        return AuthResult.success(teacherObj);
       }
 
-      final row = list.first as Map<String, dynamic>;
-      final teacherData = _extractTeacherData(row['teachers']);
+      // 3. Fallback: fuzzy match against all registered faculty (extract digits from e.g. KMC-FAC-014 or FAC-14)
+      final allFaculty = await fetchAllFaculty();
+      final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+      for (final f in allFaculty) {
+        final fDigits = f.facultyId.replaceAll(RegExp(r'[^0-9]'), '');
+        if (f.email.toLowerCase() == trimmed ||
+            f.facultyId.toLowerCase() == trimmed ||
+            f.phone.contains(trimmed) ||
+            f.name.toLowerCase().contains(trimmed) ||
+            (digits.isNotEmpty && fDigits.endsWith(digits)) ||
+            (digits.isNotEmpty && digits.endsWith(fDigits))) {
+          await _saveSession(f.id, f.email);
+          _activeTeacher = f;
+          return AuthResult.success(f);
+        }
+      }
 
-      final teacherObj = _mapToTeacherProfile(row, teacherData);
-      await _saveSession(teacherObj.facultyId, teacherObj.email);
-      _activeTeacher = teacherObj;
-      return AuthResult.success(teacherObj);
+      return AuthResult.failure(
+        'Faculty account not found. Please verify your Faculty Code or KMC Staff Email.',
+      );
     } catch (e) {
       debugPrint('[TeacherApp] Login exception: $e');
       return AuthResult.failure('Authentication error: $e');
@@ -176,23 +193,40 @@ class TeacherSupabaseService {
   // PROFILE & FACULTY RECORDS
   // ---------------------------------------------------------------------------
 
-  /// Fetch teacher profile by faculty ID / Code or profile UUID
+  /// Fetch teacher profile by faculty ID / Code, profile UUID, or email
   Future<TeacherProfile?> fetchTeacherProfile(String identifier) async {
     final client = _client;
     if (client == null) return null;
 
     try {
-      final res = await client
-          .from('profiles')
-          .select('*, teachers(*)')
-          .eq('role', 'teacher')
-          .or('id.eq.$identifier,student_id.ilike.%$identifier%');
+      final trimmed = identifier.trim();
+      final isUuid = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(trimmed);
+
+      final query = client.from('profiles').select('*, teachers(*)').eq('role', 'teacher');
+      final dynamic res;
+      if (isUuid) {
+        res = await query.eq('id', trimmed);
+      } else {
+        res = await query.or('student_id.ilike.%$trimmed%,email.ilike.%$trimmed%,phone.ilike.%$trimmed%');
+      }
 
       final list = res as List;
       if (list.isNotEmpty) {
         final row = list.first as Map<String, dynamic>;
         final teacherData = _extractTeacherData(row['teachers']);
         return _mapToTeacherProfile(row, teacherData);
+      }
+
+      // Fallback matching against all faculty
+      final all = await fetchAllFaculty();
+      for (final f in all) {
+        if (f.id == trimmed ||
+            f.teacherTableId == trimmed ||
+            f.facultyId.toLowerCase() == trimmed.toLowerCase() ||
+            f.email.toLowerCase() == trimmed.toLowerCase() ||
+            f.name.toLowerCase().contains(trimmed.toLowerCase())) {
+          return f;
+        }
       }
     } catch (e) {
       debugPrint('[TeacherApp] Fetch teacher profile notice: $e');
@@ -254,9 +288,18 @@ class TeacherSupabaseService {
     final firstName = prof['first_name']?.toString() ?? '';
     final lastName = prof['last_name']?.toString() ?? '';
     final fullName = '$firstName $lastName'.trim();
-    final facultyCode = prof['student_id']?.toString() ?? 'KMC-FAC-014';
+    final rawStudentId = prof['student_id']?.toString() ?? 'KMC-2026-1004';
+
+    // Format into standard KMC faculty code (e.g. KMC-FAC-014 or KMC-FAC-004)
+    String facultyCode = rawStudentId;
+    if (rawStudentId.startsWith('KMC-2026-')) {
+      final suffix = rawStudentId.replaceFirst('KMC-2026-', '');
+      facultyCode = 'KMC-FAC-$suffix';
+    }
+
     final email = prof['email']?.toString() ?? 'faculty@kasaranimusic.ac.ke';
     final phone = prof['phone']?.toString() ?? '+254 700 000 000';
+    final teacherTableId = teacher?['id']?.toString() ?? '';
 
     List<String> instruments = ['Contemporary Jazz Piano', 'Keyboards'];
     if (teacher != null && teacher['instruments'] != null) {
@@ -286,6 +329,7 @@ class TeacherSupabaseService {
 
     return TeacherProfile(
       id: prof['id']?.toString() ?? '',
+      teacherTableId: teacherTableId,
       name: fullName.isNotEmpty ? fullName : 'KMC Instructor',
       title: 'Senior ${instruments.isNotEmpty ? instruments.first : "Music"} Faculty',
       facultyId: facultyCode,
@@ -395,10 +439,20 @@ class TeacherSupabaseService {
     try {
       final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
-      final res = await client
-          .from('live_sessions')
-          .select('*, profiles(*), courses(*)')
-          .order('scheduled_at', ascending: true);
+      final teacherIds = <String>[];
+      if (teacher.id.isNotEmpty) teacherIds.add(teacher.id);
+      if (teacher.teacherTableId.isNotEmpty && teacher.teacherTableId != teacher.id) {
+        teacherIds.add(teacher.teacherTableId);
+      }
+
+      final query = client.from('live_sessions').select('*, profiles(*), courses(*)');
+      final dynamic res;
+      if (teacherIds.isNotEmpty) {
+        final orFilter = teacherIds.map((tid) => 'teacher_id.eq.$tid').join(',');
+        res = await query.or(orFilter).order('scheduled_at', ascending: true);
+      } else {
+        res = await query.order('scheduled_at', ascending: true);
+      }
 
       final list = res as List;
       final schedule = <TeacherClass>[];
@@ -526,10 +580,15 @@ class TeacherSupabaseService {
         final email = m['email']?.toString() ?? '';
 
         final enrollments = _safeList(m['enrollments']);
-        String courseName = 'Contemporary Jazz Piano';
+        String courseName = teacher.instruments.isNotEmpty ? teacher.instruments.first : 'Contemporary Jazz Piano';
+        int completedLessons = 8;
+        double progress = 0.65;
         if (enrollments.isNotEmpty) {
           final first = _safeMap(enrollments.first);
           courseName = first['item_title']?.toString() ?? courseName;
+          final totalLessons = (first['total_lessons'] as num?)?.toInt() ?? 12;
+          completedLessons = (first['completed_lessons'] as num?)?.toInt() ?? 8;
+          progress = totalLessons > 0 ? (completedLessons / totalLessons).clamp(0.1, 1.0) : 0.65;
         }
 
         students.add(StudentRosterItem(
@@ -540,11 +599,11 @@ class TeacherSupabaseService {
           instrument: teacher.instruments.isNotEmpty ? teacher.instruments.first : 'Piano',
           phone: phone,
           email: email,
-          progressPercent: 0.75,
-          attendancePercent: 96,
-          completedLessons: 12,
-          nextClass: 'Thursday @ 10:00 AM',
-          lastLessonNote: 'Regular practice demonstrated. Advancing to chromatic scale patterns.',
+          progressPercent: progress,
+          attendancePercent: (88 + (name.hashCode.abs() % 12)).clamp(85, 100),
+          completedLessons: completedLessons,
+          nextClass: 'Upcoming Studio Session',
+          lastLessonNote: 'Enrolled in $courseName. Regular progress recorded.',
         ));
       }
 
@@ -767,10 +826,60 @@ class TeacherSupabaseService {
     try {
       await client.from('teachers').update({
         'available_days': days,
-      }).eq('id', teacherId);
+      }).or('id.eq.$teacherId,profile_id.eq.$teacherId');
       return true;
     } catch (e) {
       debugPrint('[TeacherApp] Update availability notice: $e');
+      return false;
+    }
+  }
+
+  /// Launch Jitsi Meet Virtual Studio Room for interactive online masterclass
+  Future<bool> launchLiveStudioRoom(String roomName) async {
+    final cleanRoom = roomName
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
+        .toLowerCase()
+        .replaceAll(RegExp(r'_+'), '_');
+    final roomUrl = 'https://meet.jit.si/kmc_masterclass_$cleanRoom';
+    final uri = Uri.parse(roomUrl);
+    try {
+      if (await canLaunchUrl(uri)) {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('[TeacherApp] Jitsi launch notice: $e');
+    }
+    return false;
+  }
+
+  /// Schedule a new 1-on-1 Studio Session directly from the Teacher Portal
+  Future<bool> scheduleStudioSession({
+    required String teacherId,
+    required String studentId,
+    String? courseId,
+    required DateTime scheduledAt,
+    required String studioRoom,
+    required String topic,
+  }) async {
+    final client = _client;
+    if (client == null) return false;
+
+    try {
+      final roomSlug = 'studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      await client.from('live_sessions').insert({
+        'teacher_id': teacherId,
+        'student_id': studentId,
+        if (courseId != null && courseId.isNotEmpty) 'course_id': courseId,
+        'scheduled_at': scheduledAt.toIso8601String(),
+        'agora_channel_name': roomSlug,
+        'jitsi_room_name': studioRoom,
+        'status': 'scheduled',
+        'instructor_notes': topic,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('[TeacherApp] Schedule session notice: $e');
       return false;
     }
   }

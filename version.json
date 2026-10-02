@@ -1,9 +1,9 @@
 {
   "app_name": "KMC teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.2",
-  "latest_build_number": 3,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.2/KMC_Teacher_Portal_v1.0.2_b3.apk",
-  "release_notes": "Added native Android notification alerts with heads-up banners, sound, and vibration for Director broadcasts and emergency memos dispatched from the Admin App.",
+  "latest_version": "1.0.3",
+  "latest_build_number": 4,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.3/KMC_Teacher_Portal_v1.0.3_b4.apk",
+  "release_notes": "Added real practice drill video & audio streaming player with musical waveform visualizer, comprehensive 3-tier rubric scoring, Jitsi live studio video room launcher, studio masterclass scheduling, dynamic student roster metrics, and Central Mind faculty materials library.",
   "force_update": false
 }

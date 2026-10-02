@@ -734,6 +734,19 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               ),
             ],
           ),
+          if (nextClass.isLiveNow) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => TeacherSupabaseService.instance.launchLiveStudioRoom(nextClass.studio),
+              icon: const Icon(Icons.videocam_rounded, size: 16),
+              label: const Text('Launch Virtual Studio Room (Jitsi Meet)'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.brandBlue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 38),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -845,11 +858,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               if (tabIndex >= 0) {
                 widget.onNavigateTab(tabIndex);
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('KMC Faculty Resource Library: Lesson sheets & scales.'),
-                  ),
-                );
+                _showFacultyMaterialsSheet(context);
               }
             },
             borderRadius: BorderRadius.circular(8),
@@ -1081,6 +1090,232 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showFacultyMaterialsSheet(BuildContext context) {
+    final materials = [
+      {
+        'title': 'KMC Piano Department — Rootless Shell Voicings Guide',
+        'category': 'Sheet Music',
+        'type': 'PDF',
+        'size': '2.4 MB',
+        'desc': 'Autumn Leaves & Fly Me to the Moon ii-V-I guide sheets with fingering notation.',
+      },
+      {
+        'title': 'Hanon The Virtuoso Pianist (Part 1 Exercises 1-20)',
+        'category': 'Sheet Music',
+        'type': 'PDF',
+        'size': '4.1 MB',
+        'desc': 'Curated exercises for finger independence, agility, and wrist relaxation.',
+      },
+      {
+        'title': 'KMC Faculty Practical Grading Rubric (2026 Edition)',
+        'category': 'Curricula',
+        'type': 'DOC',
+        'size': '850 KB',
+        'desc': 'Official grading criteria for Rhythm (40%), Technique (35%), Phrasing (25%).',
+      },
+      {
+        'title': 'Jazz Swing Backing Loop — Medium Tempo (85 BPM)',
+        'category': 'Backing Loops',
+        'type': 'MP3',
+        'size': '6.8 MB',
+        'desc': 'Upright acoustic bass and brush snare loop for student modal improvisation.',
+      },
+      {
+        'title': 'Bossa Nova Rhythm Master Stem (110 BPM)',
+        'category': 'Backing Loops',
+        'type': 'MP3',
+        'size': '5.2 MB',
+        'desc': 'Authentic cross-stick and acoustic guitar accompaniment track for rehearsal.',
+      },
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.45,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, scrollController) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.borderOutline,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Faculty Resource Library',
+                            style: TextStyle(
+                              color: AppTheme.textWhite,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Syllabi, Lead Sheets & Backing Stems',
+                            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.brandGreen.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'CENTRAL MIND R2',
+                          style: TextStyle(
+                            color: AppTheme.brandGreen,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: ListView.separated(
+                      controller: scrollController,
+                      itemCount: materials.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final item = materials[index];
+                        final isPdf = item['type'] == 'PDF';
+                        final isMp3 = item['type'] == 'MP3';
+
+                        return Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBackground,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.borderOutline),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.surfaceElevated,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isPdf
+                                            ? AppTheme.brandGold.withValues(alpha: 0.5)
+                                            : isMp3
+                                                ? AppTheme.brandGreen.withValues(alpha: 0.5)
+                                                : AppTheme.accentSky.withValues(alpha: 0.5),
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      isPdf
+                                          ? Icons.picture_as_pdf_rounded
+                                          : isMp3
+                                              ? Icons.audiotrack_rounded
+                                              : Icons.description_rounded,
+                                      color: isPdf
+                                          ? AppTheme.brandGold
+                                          : isMp3
+                                              ? AppTheme.brandGreen
+                                              : AppTheme.accentSky,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item['title']!,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: AppTheme.textWhite,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '${item['category']} • ${item['type']} • ${item['size']}',
+                                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                item['desc']!,
+                                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('✓ Material ready: ${item['title']}'),
+                                          backgroundColor: AppTheme.brandGreen,
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.download_rounded, size: 14),
+                                    label: const Text('Open / Save', style: TextStyle(fontSize: 11)),
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size(0, 32),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

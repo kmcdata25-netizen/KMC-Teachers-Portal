@@ -4,6 +4,7 @@ library;
 
 class TeacherProfile {
   final String id;
+  final String teacherTableId;
   final String name;
   final String title;
   final String facultyId;
@@ -20,6 +21,7 @@ class TeacherProfile {
 
   const TeacherProfile({
     this.id = '',
+    this.teacherTableId = '',
     required this.name,
     required this.title,
     required this.facultyId,
@@ -130,7 +132,8 @@ class StudentSubmission {
   final String drillTitle;
   final String submittedTime;
   final String durationText;
-  final String mediaType; // 'Video' or 'Audio'
+  final String mediaType; // 'Video', 'Audio', or 'Score'
+  final String? mediaUrl;
   final String studentNotes;
   bool isReviewed;
   double? rating;
@@ -145,6 +148,7 @@ class StudentSubmission {
     required this.submittedTime,
     required this.durationText,
     required this.mediaType,
+    this.mediaUrl,
     required this.studentNotes,
     this.isReviewed = false,
     this.rating,
@@ -328,6 +332,7 @@ class MockTeacherData {
       submittedTime: '2 hours ago',
       durationText: '01:24 min',
       mediaType: 'Video',
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
       studentNotes: 'I used a metronome at 75 BPM. The switch to Type B took some effort.',
       isReviewed: false,
     ),
@@ -340,6 +345,7 @@ class MockTeacherData {
       submittedTime: '4 hours ago',
       durationText: '02:15 min',
       mediaType: 'Audio',
+      mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
       studentNotes: 'Focused on rhythmic displacement and quartal motifs.',
       isReviewed: false,
     ),
@@ -352,6 +358,7 @@ class MockTeacherData {
       submittedTime: 'Yesterday',
       durationText: 'PDF / Score',
       mediaType: 'Score',
+      mediaUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
       studentNotes: 'Uploaded my scanned manuscript worksheet for feedback.',
       isReviewed: false,
     ),
@@ -364,6 +371,7 @@ class MockTeacherData {
       submittedTime: 'Yesterday',
       durationText: '00:58 min',
       mediaType: 'Video',
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       studentNotes: 'Trying to keep wrists level as requested during our last class.',
       isReviewed: false,
     ),
@@ -376,6 +384,7 @@ class MockTeacherData {
       submittedTime: '2 days ago',
       durationText: '01:45 min',
       mediaType: 'Audio',
+      mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       studentNotes: 'Here is my recorded take with backing drums.',
       isReviewed: true,
       rating: 4.5,
