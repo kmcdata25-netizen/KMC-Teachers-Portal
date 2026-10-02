@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/student_communication_sheet.dart';
+import 'kmc_live_studio_screen.dart';
 
 class TeacherScheduleScreen extends StatefulWidget {
   const TeacherScheduleScreen({super.key});
@@ -612,36 +612,16 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text('Launching Studio Room: ${item.studio}...'),
-                  backgroundColor: AppTheme.brandBlue,
-                  duration: const Duration(seconds: 2),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => KMCLiveStudioScreen(session: item),
                 ),
               );
-              final ok = await TeacherSupabaseService.instance.launchLiveStudioRoom(item.studio);
-              if (!ok) {
-                final cleanRoom = item.studio
-                    .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
-                    .toLowerCase()
-                    .replaceAll(RegExp(r'_+'), '_')
-                    .replaceAll(RegExp(r'^_|_$'), '');
-                final roomUrl = 'https://meet.jit.si/kmc_masterclass_$cleanRoom';
-                await Clipboard.setData(ClipboardData(text: roomUrl));
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text('Studio link copied to clipboard: $roomUrl'),
-                    backgroundColor: AppTheme.brandGreen,
-                    duration: const Duration(seconds: 4),
-                  ),
-                );
-              }
             },
             icon: const Icon(Icons.videocam_rounded, size: 15),
             label: Text(
-              item.isLiveNow ? 'Join Studio Video Room (Jitsi Meet)' : 'Open Studio Room: ${item.studio}',
+              item.isLiveNow ? 'Enter Live Masterclass Studio' : 'Open Studio Room: ${item.studio}',
             ),
             style: FilledButton.styleFrom(
               backgroundColor: item.isLiveNow ? AppTheme.brandGreen : AppTheme.brandBlue,

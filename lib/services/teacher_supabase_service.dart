@@ -500,6 +500,8 @@ class TeacherSupabaseService {
           notes: notes,
           attendance: state,
           isLiveNow: statusStr == 'live',
+          agoraChannelName: m['agora_channel_name']?.toString() ?? '',
+          agoraToken: m['agora_token']?.toString() ?? '',
         );
 
         final matchesDay = sessionDate != null

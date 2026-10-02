@@ -73,6 +73,8 @@ class TeacherClass {
   String notes;
   AttendanceState attendance;
   final bool isLiveNow;
+  final String agoraChannelName;
+  final String agoraToken;
 
   TeacherClass({
     required this.id,
@@ -88,7 +90,12 @@ class TeacherClass {
     this.notes = '',
     this.attendance = AttendanceState.unmarked,
     this.isLiveNow = false,
+    this.agoraChannelName = '',
+    this.agoraToken = '',
   });
+
+  String get effectiveChannelName =>
+      agoraChannelName.isNotEmpty ? agoraChannelName : 'kmc_studio_${studio.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
 }
 
 class StudentRosterItem {

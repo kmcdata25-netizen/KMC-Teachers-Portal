@@ -1,9 +1,9 @@
 {
   "app_name": "KMC teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.5",
-  "latest_build_number": 6,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.5/KMC_Teacher_Portal_v1.0.5_b6.apk",
-  "release_notes": "Fix: Session date isolation (booked masterclasses only appear on their specific scheduled date), interactive date picker in scheduling dialog, resilient Jitsi live studio room launcher with browser queries and instant launch feedback.",
+  "latest_version": "1.0.6",
+  "latest_build_number": 7,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.6/KMC_Teacher_Portal_v1.0.6_b7.apk",
+  "release_notes": "Feature: Native In-App KMC Live Music Studio powered by Agora RTC. High-fidelity acoustic music profile (48kHz stereo), built-in digital metronome with tap-tempo & downbeat haptics, concert pitch tuner (A=440Hz), repertoire score viewer, front/rear camera flip for instrument view, and live lesson notes sync with Central Mind.",
   "force_update": false
 }
