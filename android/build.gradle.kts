@@ -3,6 +3,19 @@ allprojects {
         google()
         mavenCentral()
     }
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "androidx.media3") {
+                useVersion("1.3.1")
+            }
+            if (requested.group == "androidx.core" && (requested.name == "core" || requested.name == "core-ktx")) {
+                useVersion("1.13.1")
+            }
+            if (requested.group == "androidx.browser" && requested.name == "browser") {
+                useVersion("1.8.0")
+            }
+        }
+    }
 }
 
 val newBuildDir: Directory =
@@ -19,11 +32,11 @@ subprojects {
         val androidExt = proj.extensions.findByName("android") ?: return
         try {
             val method = androidExt.javaClass.getMethod("compileSdkVersion", Int::class.javaPrimitiveType)
-            method.invoke(androidExt, 36)
+            method.invoke(androidExt, 34)
         } catch (_: Exception) {
             try {
                 val method = androidExt.javaClass.getMethod("setCompileSdkVersion", String::class.java)
-                method.invoke(androidExt, "android-36")
+                method.invoke(androidExt, "android-34")
             } catch (_: Exception) {}
         }
     }
