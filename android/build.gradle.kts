@@ -32,11 +32,11 @@ subprojects {
         val androidExt = proj.extensions.findByName("android") ?: return
         try {
             val method = androidExt.javaClass.getMethod("compileSdkVersion", Int::class.javaPrimitiveType)
-            method.invoke(androidExt, 34)
+            method.invoke(androidExt, 36)
         } catch (_: Exception) {
             try {
                 val method = androidExt.javaClass.getMethod("setCompileSdkVersion", String::class.java)
-                method.invoke(androidExt, "android-34")
+                method.invoke(androidExt, "android-36")
             } catch (_: Exception) {}
         }
     }
