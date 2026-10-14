@@ -837,6 +837,8 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                           final success = await TeacherSupabaseService.instance.scheduleStudioSession(
                             teacherId: teacherId,
                             studentId: selectedStudent!.id,
+                            studentAdmissionId: selectedStudent!.studentId,
+                            studentName: selectedStudent!.name,
                             scheduledAt: scheduledDateTime,
                             studioRoom: selectedStudio,
                             topic: topicController.text.trim(),

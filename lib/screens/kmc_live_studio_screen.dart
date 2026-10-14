@@ -125,11 +125,14 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
         studioRoom: widget.session.studio,
         topic: widget.session.topic.isNotEmpty ? widget.session.topic : widget.session.courseName,
         studentId: widget.session.studentId.isNotEmpty ? widget.session.studentId : null,
+        studentProfileId: widget.session.studentProfileId.isNotEmpty ? widget.session.studentProfileId : null,
+        studentName: widget.session.studentName.isNotEmpty ? widget.session.studentName : null,
       );
     } catch (e) {
       debugPrint('[KMC Studio] Live start broadcast warning: $e');
     }
   }
+
 
   Future<void> _broadcastLiveEnd() async {
     if (_hasBroadcastEnded) return;
@@ -273,6 +276,16 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               });
             }
           },
+          onTokenPrivilegeWillExpire: (RtcConnection connection, String token) async {
+            debugPrint('[KMC Studio] Agora token expiring soon. Auto-renewing...');
+            final freshToken = AgoraConfig.generateRtcToken(
+              channelName: connection.channelId ?? widget.session.effectiveChannelName,
+              uid: connection.localUid ?? 0,
+            );
+            if (freshToken.isNotEmpty) {
+              await _engine?.renewToken(freshToken);
+            }
+          },
           onError: (ErrorCodeType err, String msg) {
             debugPrint('[KMC Studio] Agora Error: $err, $msg');
           },
@@ -287,9 +300,11 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
       // Set Broadcaster role for teacher
       await _engine!.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
 
-      // Join Channel
+      // Join Channel with pre-generated or auto-minted token
       final channel = widget.session.effectiveChannelName;
-      final token = widget.session.agoraToken;
+      final token = widget.session.agoraToken.isNotEmpty
+          ? widget.session.agoraToken
+          : AgoraConfig.generateRtcToken(channelName: channel, uid: 0);
       await _engine!.joinChannel(
         token: token,
         channelId: channel,
@@ -748,6 +763,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
             ),
           ),
           const SizedBox(width: 8),
+
 
           // Cloud Live Broadcast Setup / Status Badge
           InkWell(

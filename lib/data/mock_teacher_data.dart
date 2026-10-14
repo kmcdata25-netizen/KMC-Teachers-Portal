@@ -75,6 +75,7 @@ class TeacherClass {
   final bool isLiveNow;
   final String agoraChannelName;
   final String agoraToken;
+  final String studentProfileId;
 
   TeacherClass({
     required this.id,
@@ -82,6 +83,7 @@ class TeacherClass {
     required this.level,
     required this.studentName,
     required this.studentId,
+    this.studentProfileId = '',
     this.studentPhone = '',
     this.studentEmail = '',
     required this.timeSlot,

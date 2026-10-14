@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/agora_config.dart';
 import '../config/supabase_config.dart';
 import '../data/mock_teacher_data.dart';
 
@@ -464,7 +465,6 @@ class TeacherSupabaseService {
         final course = _safeMap(m['courses']);
 
         final studentName = "${prof['first_name'] ?? ''} ${prof['last_name'] ?? ''}".trim();
-        final studentId = prof['student_id']?.toString() ?? 'KMC-2026-1001';
         final courseTitle = course['title']?.toString() ?? (m['course_id'] != null ? 'Music Performance' : 'Studio Masterclass');
         final studioRoom = m['jitsi_room_name']?.toString() ?? 'Studio 3 (Yamaha C7 Grand)';
         final statusStr = m['status']?.toString() ?? 'scheduled';
@@ -486,12 +486,16 @@ class TeacherSupabaseService {
           timeFormatted = schedAt.split('T')[1].substring(0, 5);
         }
 
+        final profId = prof['id']?.toString() ?? m['student_id']?.toString() ?? '';
+        final studentAdmissionId = prof['student_id']?.toString() ?? 'KMC-2026-1001';
+
         final tc = TeacherClass(
           id: m['id']?.toString() ?? '',
           courseName: courseTitle,
           level: course['level']?.toString() ?? 'Intermediate',
           studentName: studentName.isNotEmpty ? studentName : 'Enrolled Student',
-          studentId: studentId,
+          studentId: studentAdmissionId,
+          studentProfileId: profId,
           studentPhone: prof['phone']?.toString() ?? '',
           studentEmail: prof['email']?.toString() ?? '',
           timeSlot: '$timeFormatted – 1 hour',
@@ -879,6 +883,8 @@ class TeacherSupabaseService {
   Future<bool> scheduleStudioSession({
     required String teacherId,
     required String studentId,
+    String? studentAdmissionId,
+    String? studentName,
     String? courseId,
     required DateTime scheduledAt,
     required String studioRoom,
@@ -889,12 +895,14 @@ class TeacherSupabaseService {
 
     try {
       final roomSlug = 'kmc_studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
       await client.from('live_sessions').insert({
         'teacher_id': teacherId,
         'student_id': studentId,
         if (courseId != null && courseId.isNotEmpty) 'course_id': courseId,
         'scheduled_at': scheduledAt.toIso8601String(),
         'agora_channel_name': roomSlug,
+        'agora_token': agoraToken,
         'jitsi_room_name': studioRoom,
         'status': 'scheduled',
         'instructor_notes': topic,
@@ -910,6 +918,8 @@ class TeacherSupabaseService {
           'sender_role': 'teacher',
           'recipient_type': 'individual_student',
           'recipient_id': studentId,
+          'recipient_name': studentName,
+          'secondary_recipient_id': studentAdmissionId,
           'title': 'Studio Lesson Scheduled: $topic',
           'message': 'Your 1-on-1 session in $studioRoom with $teacherName has been booked for $formattedDate.',
           'category': 'lesson',
@@ -934,28 +944,44 @@ class TeacherSupabaseService {
     required String studioRoom,
     required String topic,
     String? studentId,
+    String? studentProfileId,
+    String? studentName,
   }) async {
     final client = _client;
     if (client == null) return false;
 
     try {
       final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
-      final roomSlug = 'kmc_studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      final cleanRoom = studioRoom
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
+          .toLowerCase()
+          .replaceAll(RegExp(r'_+'), '_')
+          .replaceAll(RegExp(r'^_|_$'), '');
+      final roomSlug = 'kmc_studio_$cleanRoom';
+      final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
 
       // 1. Update session status in live_sessions or insert if ad-hoc studio session
-      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo')) {
+      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo') && !sessionId.startsWith('live_studio_')) {
         await client.from('live_sessions').update({
           'status': 'live',
+          'agora_channel_name': roomSlug,
+          'agora_token': agoraToken,
+          'jitsi_room_name': studioRoom,
         }).eq('id', sessionId);
       } else {
         final teacherId = _activeTeacher?.teacherTableId.isNotEmpty == true
             ? _activeTeacher!.teacherTableId
             : (_activeTeacher?.id ?? '');
+        final targetStudentId = (studentProfileId != null && studentProfileId.isNotEmpty)
+            ? studentProfileId
+            : (studentId != null && studentId.isNotEmpty && studentId != 'STUDIO-OPEN' ? studentId : null);
+
         await client.from('live_sessions').insert({
           if (teacherId.isNotEmpty) 'teacher_id': teacherId,
-          if (studentId != null && studentId.isNotEmpty) 'student_id': studentId,
+          if (targetStudentId != null) 'student_id': targetStudentId,
           'scheduled_at': DateTime.now().toIso8601String(),
           'agora_channel_name': roomSlug,
+          'agora_token': agoraToken,
           'jitsi_room_name': studioRoom,
           'status': 'live',
           'instructor_notes': topic.isNotEmpty ? topic : 'Live Masterclass Practice Lab',
@@ -963,12 +989,21 @@ class TeacherSupabaseService {
         });
       }
 
+      final isOpenMasterclass = studentId == null ||
+          studentId.isEmpty ||
+          studentId == 'STUDIO-OPEN' ||
+          studentId.toLowerCase() == 'all';
+
       // 2. Dispatch real-time live alert into notifications table
       await client.from('notifications').insert({
         'sender_name': teacherName,
         'sender_role': 'teacher',
-        'recipient_type': (studentId != null && studentId.isNotEmpty) ? 'individual_student' : 'all_students',
-        'recipient_id': studentId,
+        'recipient_type': isOpenMasterclass ? 'all_students' : 'individual_student',
+        'recipient_id': isOpenMasterclass
+            ? null
+            : (studentProfileId != null && studentProfileId.isNotEmpty ? studentProfileId : studentId),
+        'recipient_name': studentName,
+        'secondary_recipient_id': isOpenMasterclass ? null : studentId,
         'title': '🔴 LIVE NOW: $teacherName in $studioRoom',
         'message': 'Masterclass "$topic" is now streaming live in $studioRoom. Tap to join the live studio!',
         'category': 'masterclass',

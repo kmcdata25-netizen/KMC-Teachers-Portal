@@ -9,6 +9,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.6.4"
+  agora_token_generator:
+    dependency: "direct main"
+    description:
+      name: agora_token_generator
+      sha256: eeb53d753430b6d6227b05ace89655cd7990b3137a236937825699d528377904
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   app_links:
     dependency: transitive
     description:
