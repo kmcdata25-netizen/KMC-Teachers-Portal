@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:camera/camera.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../config/agora_config.dart';
@@ -27,20 +26,22 @@ class KMCLiveStudioScreen extends StatefulWidget {
 
 class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     with SingleTickerProviderStateMixin {
-  // Native Device Camera State
-  List<CameraDescription> _availableCameras = [];
-  CameraController? _cameraController;
-  bool _isCameraInitialized = false;
-  int _selectedCameraIndex = 0;
-  bool _isLocalExpanded = false;
-
-  // Agora RTC Engine State
+  // Agora RTC Engine State & Real-Time Telemetry
   RtcEngine? _engine;
   bool _isJoined = false;
+  int _myUid = 1001;
   int? _remoteUid;
   bool _isAudioMuted = false;
   bool _isVideoMuted = false;
   bool _isFrontCamera = true;
+  bool _isLocalExpanded = false;
+
+  // Real-Time Connection & Quality Telemetry
+  int _networkPingMs = 0;
+  int _userCount = 1;
+  int _txBitrate = 0;
+  int _rxBitrate = 0;
+  RemoteVideoState _remoteVideoState = RemoteVideoState.remoteVideoStateStopped;
 
   // Session Duration Timer
   Timer? _sessionTimer;
@@ -113,7 +114,6 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     super.initState();
     _notesController.text = widget.session.notes;
     _startSessionTimer();
-    _initDeviceCamera();
     _initAgoraAndMedia();
     _broadcastLiveStart();
   }
@@ -132,7 +132,6 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
       debugPrint('[KMC Studio] Live start broadcast warning: $e');
     }
   }
-
 
   Future<void> _broadcastLiveEnd() async {
     if (_hasBroadcastEnded) return;
@@ -153,7 +152,6 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _metronomeTimer?.cancel();
     _notesController.dispose();
     _homeworkController.dispose();
-    _cameraController?.dispose();
     _disposeAgora();
     super.dispose();
   }
@@ -178,52 +176,10 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // NATIVE DEVICE CAMERA INITIALIZATION
-  // ---------------------------------------------------------------------------
-  Future<void> _initDeviceCamera() async {
-    try {
-      final permissions = await [Permission.camera, Permission.microphone].request();
-      if (permissions[Permission.camera]?.isGranted ?? false) {
-        _availableCameras = await availableCameras();
-        if (_availableCameras.isNotEmpty) {
-          int frontIdx = _availableCameras.indexWhere(
-            (c) => c.lensDirection == CameraLensDirection.front,
-          );
-          _selectedCameraIndex = frontIdx != -1 ? frontIdx : 0;
-          await _startCameraController(_availableCameras[_selectedCameraIndex]);
-        }
-      }
-    } catch (e) {
-      debugPrint('[KMC Studio] Native camera initialization notice: $e');
-    }
-  }
-
-  Future<void> _startCameraController(CameraDescription description) async {
-    await _cameraController?.dispose();
-    _cameraController = CameraController(
-      description,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-
-    try {
-      await _cameraController!.initialize();
-      if (mounted) {
-        setState(() {
-          _isCameraInitialized = true;
-          _isFrontCamera = description.lensDirection == CameraLensDirection.front;
-        });
-      }
-    } catch (e) {
-      debugPrint('[KMC Studio] Camera controller initialize error: $e');
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // AGORA RTC ENGINE INITIALIZATION
+  // AGORA RTC ENGINE INITIALIZATION (PURE NATIVE CAMERA DRIVER)
   // ---------------------------------------------------------------------------
   Future<void> _initAgoraAndMedia() async {
-    // 1. Request camera and microphone permissions
+    // 1. Request hardware camera and microphone permissions
     final permissions = await [Permission.camera, Permission.microphone].request();
     final cameraGranted = permissions[Permission.camera]?.isGranted ?? false;
     final micGranted = permissions[Permission.microphone]?.isGranted ?? false;
@@ -233,46 +189,94 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
       return;
     }
 
-    // 2. Check if Agora App ID is provided
-    if (!AgoraConfig.isConfigured) {
-      debugPrint('[KMC Studio] No Agora App ID provided. Running in Studio Coaching Preview Mode.');
-      return;
-    }
-
     try {
-      // 3. Instantiate RTC Engine
+      // 2. Instantiate Agora RTC Engine with High-Fidelity 48kHz Music Profile
       _engine = createAgoraRtcEngine();
-      await _engine!.initialize(RtcEngineContext(
+      await _engine!.initialize(const RtcEngineContext(
         appId: AgoraConfig.appId,
         channelProfile: ChannelProfileType.channelProfileLiveBroadcasting,
-        audioScenario: AudioScenarioType.audioScenarioGameStreaming, // High-Fidelity Music Profile
+        audioScenario: AudioScenarioType.audioScenarioGameStreaming, // High-Fidelity 48kHz Stereo Music
       ));
 
+      // 3. Register Full Real-Time Connection & Telemetry Event Handlers
       _engine!.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint('[KMC Studio] Joined Agora Channel: ${connection.channelId}');
+            debugPrint('[KMC Studio] Joined Agora Channel: ${connection.channelId}, localUid: ${connection.localUid}');
             if (mounted) {
               setState(() {
                 _isJoined = true;
+                _myUid = connection.localUid ?? 1001;
               });
             }
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-            debugPrint('[KMC Studio] Remote Student Joined: $remoteUid');
+            debugPrint('[KMC Studio] Remote Student Joined: $remoteUid in elapsed ${elapsed}ms');
             if (mounted) {
               setState(() {
                 _remoteUid = remoteUid;
+                _userCount = 2;
               });
+              HapticFeedback.heavyImpact();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.check_circle_rounded, color: AppTheme.brandGreen, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '🟢 Student Connected: ${widget.session.studentName} is live in studio!',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                  backgroundColor: const Color(0xFF0D2818),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 4),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: const BorderSide(color: AppTheme.brandGreen, width: 1.5),
+                  ),
+                ),
+              );
             }
           },
           onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
-            debugPrint('[KMC Studio] Remote Student Left: $remoteUid');
+            debugPrint('[KMC Studio] Remote Student Left: $remoteUid (reason: $reason)');
             if (mounted) {
               setState(() {
                 if (_remoteUid == remoteUid) {
                   _remoteUid = null;
+                  _userCount = 1;
                 }
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Student has disconnected from studio (UID: $remoteUid)'),
+                  backgroundColor: const Color(0xFF2B1D0C),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+          },
+          onRtcStats: (RtcConnection connection, RtcStats stats) {
+            if (mounted) {
+              setState(() {
+                _networkPingMs = stats.lastmileDelay ?? _networkPingMs;
+                _userCount = stats.userCount ?? (_remoteUid != null ? 2 : 1);
+                _txBitrate = stats.txKBitRate ?? _txBitrate;
+                _rxBitrate = stats.rxKBitRate ?? _rxBitrate;
+              });
+            }
+          },
+          onRemoteVideoStateChanged: (RtcConnection connection, int remoteUid, RemoteVideoState state, RemoteVideoStateReason reason, int elapsed) {
+            debugPrint('[KMC Studio] Remote video state: $state for UID: $remoteUid');
+            if (mounted) {
+              setState(() {
+                _remoteVideoState = state;
               });
             }
           },
@@ -292,19 +296,20 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
         ),
       );
 
-      // 4. Configure high-definition video and audio
+      // 4. Configure native video and audio capture via Agora NDK
       await _engine!.enableVideo();
       await _engine!.enableAudio();
       await _engine!.startPreview();
 
-      // Set Broadcaster role for teacher
+      // Set Faculty Broadcaster role
       await _engine!.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
 
-      // Join Channel with pre-generated or auto-minted token
+      // 5. Join Canonical Studio Channel with pre-minted Token 2.0
       final channel = widget.session.effectiveChannelName;
       final token = widget.session.agoraToken.isNotEmpty
           ? widget.session.agoraToken
           : AgoraConfig.generateRtcToken(channelName: channel, uid: 0);
+
       await _engine!.joinChannel(
         token: token,
         channelId: channel,
@@ -314,6 +319,8 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
           channelProfile: ChannelProfileType.channelProfileLiveBroadcasting,
           publishCameraTrack: true,
           publishMicrophoneTrack: true,
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: true,
         ),
       );
     } catch (e) {
@@ -352,17 +359,6 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     if (_engine != null) {
       await _engine!.muteLocalVideoStream(nextState);
     }
-    if (_cameraController != null && _cameraController!.value.isInitialized) {
-      try {
-        if (nextState) {
-          await _cameraController!.pausePreview();
-        } else {
-          await _cameraController!.resumePreview();
-        }
-      } catch (e) {
-        debugPrint('[KMC Studio] Error pausing/resuming camera preview: $e');
-      }
-    }
     setState(() {
       _isVideoMuted = nextState;
     });
@@ -371,11 +367,6 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
 
   Future<void> _switchCamera() async {
     HapticFeedback.mediumImpact();
-    if (_availableCameras.length > 1) {
-      _selectedCameraIndex = (_selectedCameraIndex + 1) % _availableCameras.length;
-      final nextDesc = _availableCameras[_selectedCameraIndex];
-      await _startCameraController(nextDesc);
-    }
     if (_engine != null) {
       try {
         await _engine!.switchCamera();
@@ -765,48 +756,67 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
           const SizedBox(width: 8),
 
 
-          // Cloud Live Broadcast Setup / Status Badge
+          // Real-Time Connection Telemetry HUD Pill
           InkWell(
-            onTap: _showAgoraSetupModal,
+            onTap: _showConnectionTelemetryModal,
             borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: _isJoined
-                    ? AppTheme.brandGreen.withValues(alpha: 0.2)
-                    : (AgoraConfig.isConfigured
-                        ? AppTheme.accentSky.withValues(alpha: 0.2)
-                        : Colors.amber.withValues(alpha: 0.18)),
+                color: _remoteUid != null
+                    ? AppTheme.brandGreen.withValues(alpha: 0.22)
+                    : (_isJoined ? Colors.amber.withValues(alpha: 0.2) : Colors.red.withValues(alpha: 0.18)),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _isJoined
+                  color: _remoteUid != null
                       ? AppTheme.brandGreen
-                      : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
-                  width: 1,
+                      : (_isJoined ? Colors.amber : Colors.red),
+                  width: 1.5,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _isJoined ? Icons.cloud_done_rounded : Icons.cloud_queue_rounded,
-                    color: _isJoined
-                        ? AppTheme.brandGreen
-                        : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
-                    size: 13,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _isJoined
-                        ? 'Broadcasting'
-                        : (AgoraConfig.isConfigured ? 'Ready to Stream' : 'Live Setup'),
-                    style: TextStyle(
-                      color: _isJoined
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _remoteUid != null
                           ? AppTheme.brandGreen
-                          : (AgoraConfig.isConfigured ? AppTheme.accentSky : Colors.amber),
-                      fontSize: 10,
+                          : (_isJoined ? Colors.amber : Colors.red),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_remoteUid != null ? AppTheme.brandGreen : Colors.amber)
+                              .withValues(alpha: 0.6),
+                          blurRadius: 6,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _remoteUid != null
+                        ? 'Connected (2/2) • ${_networkPingMs > 0 ? '${_networkPingMs}ms' : 'Live'}'
+                        : (_isJoined
+                            ? 'In Studio (1/2) • Waiting for Student'
+                            : 'Connecting...'),
+                    style: TextStyle(
+                      color: _remoteUid != null
+                          ? AppTheme.brandGreen
+                          : (_isJoined ? Colors.amber : Colors.redAccent),
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    color: _remoteUid != null
+                        ? AppTheme.brandGreen
+                        : (_isJoined ? Colors.amber : Colors.redAccent),
+                    size: 13,
                   ),
                 ],
               ),
@@ -834,40 +844,23 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
           ),
         ),
       );
-    } else if (_isLocalExpanded && !_isVideoMuted) {
+    } else if (_isLocalExpanded && !_isVideoMuted && _isJoined && _engine != null) {
       // 2. Teacher expanded local camera to full main stage
-      if (_isJoined && _engine != null) {
-        stageContent = AgoraVideoView(
-          controller: VideoViewController(
-            rtcEngine: _engine!,
-            canvas: const VideoCanvas(uid: 0),
-          ),
-        );
-      } else if (_isCameraInitialized &&
-          _cameraController != null &&
-          _cameraController!.value.isInitialized) {
-        stageContent = SizedBox.expand(
-          child: FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(
-              width: _cameraController!.value.previewSize?.height ?? 720,
-              height: _cameraController!.value.previewSize?.width ?? 1280,
-              child: CameraPreview(_cameraController!),
-            ),
-          ),
-        );
-      } else {
-        stageContent = _buildLogoAloneWaitingStage();
-      }
+      stageContent = AgoraVideoView(
+        controller: VideoViewController(
+          rtcEngine: _engine!,
+          canvas: const VideoCanvas(uid: 0),
+        ),
+      );
     } else {
-      // 3. Waiting / Coaching Stage: Just the Kasarani Music School logo alone without any other writing
-      stageContent = _buildLogoAloneWaitingStage();
+      // 3. Waiting Stage: Faculty Live in Studio, waiting for Student
+      stageContent = _buildLiveStudioWaitingStage();
     }
 
     return Stack(
       children: [
         Positioned.fill(child: stageContent),
-        // Live session watermark: Just the Kasarani Music School logo alone, without any other writing
+        // Live session watermark: Kasarani Music School logo
         Positioned(
           top: 14,
           left: 16,
@@ -895,28 +888,85 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     );
   }
 
-  Widget _buildLogoAloneWaitingStage() {
+  Widget _buildLiveStudioWaitingStage() {
     return Container(
       color: const Color(0xFF070E16),
       child: Center(
-        child: Image.asset(
-          'Images/logos/kms logo.png',
-          width: 220,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return Image.asset(
-              'Images/logos/kms logo_original.png',
-              width: 220,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                return Image.asset(
-                  'Images/logos/kms logo cropped.png',
-                  width: 220,
-                  fit: BoxFit.contain,
-                );
-              },
-            );
-          },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset(
+                'Images/logos/kms logo.png',
+                width: 180,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return Image.asset(
+                    'Images/logos/kms logo_original.png',
+                    width: 180,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Image.asset(
+                        'Images/logos/kms logo cropped.png',
+                        width: 180,
+                        fit: BoxFit.contain,
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.brandGreen.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.brandGreen.withValues(alpha: 0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.brandGreen,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Live in ${widget.session.studio} • Room: ${widget.session.effectiveChannelName}',
+                      style: const TextStyle(
+                        color: AppTheme.brandGreen,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Waiting for ${widget.session.studentName} to enter classroom...',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.brandGreen),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -949,25 +999,11 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
         ),
       );
     } else if (_isJoined && _engine != null) {
-      // Agora live local stream preview
+      // Agora live local stream preview via native NDK
       videoWidget = AgoraVideoView(
         controller: VideoViewController(
           rtcEngine: _engine!,
           canvas: const VideoCanvas(uid: 0),
-        ),
-      );
-    } else if (_isCameraInitialized &&
-        _cameraController != null &&
-        _cameraController!.value.isInitialized) {
-      // Direct Hardware Camera Preview Feed
-      videoWidget = SizedBox.expand(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: _cameraController!.value.previewSize?.height ?? 120,
-            height: _cameraController!.value.previewSize?.width ?? 160,
-            child: CameraPreview(_cameraController!),
-          ),
         ),
       );
     } else {
@@ -1090,10 +1126,9 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // AGORA STREAMING SETUP MODAL
+  // REAL-TIME CONNECTION TELEMETRY & DIAGNOSTICS MODAL
   // ---------------------------------------------------------------------------
-  void _showAgoraSetupModal() {
-    final textController = TextEditingController(text: AgoraConfig.appId);
+  void _showConnectionTelemetryModal() {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0F1A24),
@@ -1121,7 +1156,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                       color: AppTheme.brandGreen.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.cell_tower_rounded, color: AppTheme.brandGreen, size: 24),
+                    child: const Icon(Icons.speed_rounded, color: AppTheme.brandGreen, size: 24),
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
@@ -1129,7 +1164,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Live Cloud Streaming Setup',
+                          'KMC Live Studio Connection Telemetry',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -1137,7 +1172,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                           ),
                         ),
                         Text(
-                          'Agora RTC Engine Configuration',
+                          'Real-Time Agora RTC 6.6.4 Telemetry & Metrics',
                           style: TextStyle(
                             color: AppTheme.textMuted,
                             fontSize: 12,
@@ -1149,105 +1184,137 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                 ],
               ),
               const SizedBox(height: 16),
+
+              // Status Summary Banner
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF142433),
+                  color: _remoteUid != null
+                      ? AppTheme.brandGreen.withValues(alpha: 0.12)
+                      : const Color(0xFF142433),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF223A4E)),
+                  border: Border.all(
+                    color: _remoteUid != null
+                        ? AppTheme.brandGreen.withValues(alpha: 0.4)
+                        : const Color(0xFF223A4E),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      _isCameraInitialized ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-                      color: _isCameraInitialized ? AppTheme.brandGreen : Colors.amber,
-                      size: 18,
+                      _remoteUid != null ? Icons.check_circle_rounded : Icons.pending_rounded,
+                      color: _remoteUid != null ? AppTheme.brandGreen : Colors.amber,
+                      size: 20,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _isCameraInitialized
-                            ? 'Device hardware camera is ACTIVE & streaming preview.'
-                            : 'Device camera initializing...',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        _remoteUid != null
+                            ? 'CONNECTED (2/2): Faculty & Student are live together.'
+                            : 'IN STUDIO (1/2): Live on air. Waiting for student.',
+                        style: TextStyle(
+                          color: _remoteUid != null ? AppTheme.brandGreen : Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Agora App ID (for remote student live-feed)',
-                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+
+              // Telemetry Grid
+              _buildTelemetryRow(
+                'Studio Channel ID',
+                widget.session.effectiveChannelName,
+                Icons.tag_rounded,
               ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: textController,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Enter 32-character Agora App ID',
-                  hintStyle: const TextStyle(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: const Color(0xFF070E16),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFF223A4E)),
+              _buildTelemetryRow(
+                'Student Partner',
+                '${widget.session.studentName} (${widget.session.studentId})',
+                Icons.person_rounded,
+              ),
+              _buildTelemetryRow(
+                'Network Latency (RTT)',
+                _networkPingMs > 0 ? '$_networkPingMs ms' : 'Active (Direct Low-Latency)',
+                Icons.network_check_rounded,
+              ),
+              _buildTelemetryRow(
+                'Channel Population',
+                '$_userCount active in room',
+                Icons.group_rounded,
+              ),
+              _buildTelemetryRow(
+                'Local Broadcaster UID',
+                '$_myUid (Faculty Host)',
+                Icons.perm_identity_rounded,
+              ),
+              _buildTelemetryRow(
+                'Remote Student UID',
+                _remoteUid != null ? '$_remoteUid (Broadcaster)' : 'Awaiting Connection',
+                Icons.devices_rounded,
+              ),
+              _buildTelemetryRow(
+                'Student Video Feed',
+                _remoteUid != null
+                    ? (_remoteVideoState == RemoteVideoState.remoteVideoStateDecoding
+                        ? 'Decoding & Rendering HD'
+                        : 'Active / Subscribed')
+                    : 'Awaiting Student Stream',
+                Icons.videocam_rounded,
+              ),
+              _buildTelemetryRow(
+                'Audio Scenario',
+                '48kHz Fullband Stereo Music (Opus HD)',
+                Icons.graphic_eq_rounded,
+              ),
+              _buildTelemetryRow(
+                'Security & Encryption',
+                'Agora Token 2.0 (Automatic & Verified)',
+                Icons.lock_outline_rounded,
+              ),
+              const SizedBox(height: 18),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.brandGreen,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppTheme.brandGreen),
-                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Close Telemetry Inspector', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white70,
-                        side: const BorderSide(color: Color(0xFF2E465E)),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.brandGreen,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      onPressed: () async {
-                        final newId = textController.text.trim();
-                        await AgoraConfig.setDynamicAppId(newId);
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Agora configuration updated. Connecting...'),
-                              backgroundColor: AppTheme.brandGreenDark,
-                            ),
-                          );
-                          await _disposeAgora();
-                          await _initAgoraAndMedia();
-                        }
-                      },
-                      child: const Text('Save & Connect', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildTelemetryRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textMuted),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -894,7 +894,7 @@ class TeacherSupabaseService {
     if (client == null) return false;
 
     try {
-      final roomSlug = 'kmc_studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      final roomSlug = KmcChannelHelper.sanitize(studioRoom);
       final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
       await client.from('live_sessions').insert({
         'teacher_id': teacherId,
@@ -952,12 +952,7 @@ class TeacherSupabaseService {
 
     try {
       final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
-      final cleanRoom = studioRoom
-          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
-          .toLowerCase()
-          .replaceAll(RegExp(r'_+'), '_')
-          .replaceAll(RegExp(r'^_|_$'), '');
-      final roomSlug = 'kmc_studio_$cleanRoom';
+      final roomSlug = KmcChannelHelper.sanitize(studioRoom);
       final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
 
       // 1. Update session status in live_sessions or insert if ad-hoc studio session

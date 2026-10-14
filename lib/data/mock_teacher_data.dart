@@ -59,6 +59,35 @@ enum AttendanceState {
   excused,
 }
 
+class KmcChannelHelper {
+  static String sanitize(String studio) {
+    final lower = studio.toLowerCase().trim();
+    if (lower.contains('studio 3') || lower.contains('studio_3') || lower.contains('yamaha c7') || lower.contains('grand')) {
+      return 'kmc_studio_3';
+    }
+    if (lower.contains('studio 1') || lower.contains('studio_1')) {
+      return 'kmc_studio_1';
+    }
+    if (lower.contains('studio 2') || lower.contains('studio_2')) {
+      return 'kmc_studio_2';
+    }
+    if (lower.contains('studio 4') || lower.contains('studio_4')) {
+      return 'kmc_studio_4';
+    }
+    if (lower.contains('sound lab') || lower.contains('lab 1')) {
+      return 'kmc_sound_lab_1';
+    }
+    if (lower.contains('main hall') || lower.contains('hall')) {
+      return 'kmc_main_hall';
+    }
+    final clean = lower
+        .replaceAll(RegExp(r'[^a-z0-9]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    return clean.isNotEmpty ? 'kmc_studio_$clean' : 'kmc_studio_3';
+  }
+}
+
 class TeacherClass {
   final String id;
   final String courseName;
@@ -97,7 +126,7 @@ class TeacherClass {
   });
 
   String get effectiveChannelName =>
-      agoraChannelName.isNotEmpty ? agoraChannelName : 'kmc_studio_${studio.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      agoraChannelName.isNotEmpty ? agoraChannelName : KmcChannelHelper.sanitize(studio);
 }
 
 class StudentRosterItem {
