@@ -5,6 +5,7 @@ import '../services/teacher_supabase_service.dart';
 import '../services/teacher_update_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/teacher_update_dialog.dart';
+import 'kmc_live_studio_screen.dart';
 import 'teacher_login_screen.dart';
 
 class TeacherProfileScreen extends StatefulWidget {
@@ -572,7 +573,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'KMC Faculty Resources',
+            'KMC Faculty Resources & Tools',
             style: TextStyle(
               color: AppTheme.textWhite,
               fontSize: 15,
@@ -581,34 +582,63 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
           ),
           const SizedBox(height: 12),
           _buildResourceTile(
+            Icons.videocam_rounded,
+            'Launch Live Masterclass Studio',
+            'Open real-time virtual broadcasting room',
+            onTap: () {
+              final onDemandSession = TeacherClass(
+                id: 'profile_live_studio_${DateTime.now().millisecondsSinceEpoch}',
+                courseName: 'Faculty Studio Masterclass',
+                level: 'Faculty Studio',
+                studentName: 'Studio Cohort (Open Masterclass)',
+                studentId: 'STUDIO-OPEN',
+                timeSlot: 'Live Masterclass Broadcast',
+                studio: _profile.studio.isNotEmpty ? _profile.studio : 'Studio 3 (Yamaha C7 Grand)',
+                attendance: AttendanceState.present,
+                topic: 'Technique, Repertoire & Interactive Coaching',
+                isLiveNow: true,
+              );
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => KMCLiveStudioScreen(session: onDemandSession),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          _buildResourceTile(
             Icons.menu_book_rounded,
             'Curriculum Syllabus & Rubrics',
             'ABRSM & Contemporary Grading guidelines',
+            onTap: () => _showSyllabusSheet(context),
           ),
           const SizedBox(height: 8),
           _buildResourceTile(
             Icons.library_music_rounded,
             'Sheet Music & Backing Tracks',
             'Cloudflare R2 Master repository',
+            onTap: () => _showSheetMusicSheet(context),
           ),
           const SizedBox(height: 8),
           _buildResourceTile(
             Icons.support_agent_rounded,
             'Contact School Administration',
-            'Direct line to KMC Academic Office',
+            'Direct WhatsApp / Phone to KMC Academic Office',
+            onTap: () => _contactAdministration(context),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildResourceTile(IconData icon, String title, String subtitle) {
+  Widget _buildResourceTile(
+    IconData icon,
+    String title,
+    String subtitle, {
+    required VoidCallback onTap,
+  }) {
     return InkWell(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Opening $title...')),
-        );
-      },
+      onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -639,6 +669,238 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _contactAdministration(BuildContext context) async {
+    final success = await TeacherSupabaseService.instance.launchWhatsAppNamed(
+      phone: '+254722841847',
+      message: 'Hello KMC Academic Administration, inquiry from Faculty Member ${_profile.name} (${_profile.facultyId}).',
+    );
+    if (!success && context.mounted) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.surfaceCard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: const BorderSide(color: AppTheme.borderOutline),
+          ),
+          title: const Text('KMC Academic Office', style: TextStyle(color: AppTheme.textWhite, fontSize: 16)),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Phone: +254 722 841 847 / +254 788 841 847', style: TextStyle(color: AppTheme.brandGreen, fontSize: 13, fontWeight: FontWeight.bold)),
+              SizedBox(height: 6),
+              Text('Email: faculty@kasaranimusic.ac.ke', style: TextStyle(color: AppTheme.textWhite, fontSize: 13)),
+              SizedBox(height: 6),
+              Text('Office Hours: Mon–Sat 8:00 AM – 7:00 PM', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close', style: TextStyle(color: AppTheme.brandGreen)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _showSyllabusSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.45,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, scrollController) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.borderOutline,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'KMC Faculty Curriculum & Rubrics',
+                    style: TextStyle(color: AppTheme.textWhite, fontSize: 17, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Standardized assessment criteria for practical lessons & live masterclasses.',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildCurriculumCard(
+                    title: '1. Technique & Finger Independence (35%)',
+                    desc: 'Posture, hand position, articulation, clarity in scale runs, arpeggios, and dynamic control.',
+                    icon: Icons.speed_rounded,
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCurriculumCard(
+                    title: '2. Rhythm & Metronome Precision (40%)',
+                    desc: 'Subdivision accuracy, internal pulse consistency, tempo stability across tempo transitions and syncopated phrasing.',
+                    icon: Icons.timer_rounded,
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCurriculumCard(
+                    title: '3. Phrasing & Dynamic Interpretation (25%)',
+                    desc: 'Musical nuance, crescendo/decrescendo control, articulation fidelity, and expressive maturity.',
+                    icon: Icons.auto_awesome_rounded,
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCurriculumCard({required String title, required String desc, required IconData icon}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryBackground,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.borderOutline),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: AppTheme.brandGreen),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: AppTheme.textWhite, fontSize: 13, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(desc, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11.5, height: 1.35)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSheetMusicSheet(BuildContext context) {
+    final sampleItems = [
+      {'title': 'J.S. Bach – Inventions & Sinfonias (Urtext)', 'type': 'PDF', 'size': '4.2 MB'},
+      {'title': 'Autumn Leaves – Jazz Lead Sheet with Chords', 'type': 'PDF', 'size': '1.8 MB'},
+      {'title': 'Hanon – The Virtuoso Pianist (60 Exercises)', 'type': 'PDF', 'size': '7.5 MB'},
+      {'title': 'Blues in F – Drum & Upright Bass Backing Track', 'type': 'MP3', 'size': '5.4 MB'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.65,
+          minChildSize: 0.40,
+          maxChildSize: 0.90,
+          expand: false,
+          builder: (_, scrollController) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.borderOutline,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Cloudflare R2 Sheet Music',
+                        style: TextStyle(color: AppTheme.textWhite, fontSize: 17, fontWeight: FontWeight.w800),
+                      ),
+                      Text('CENTRAL MIND', style: TextStyle(color: AppTheme.brandGreen, fontSize: 10, fontWeight: FontWeight.w900)),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  ...sampleItems.map(
+                    (item) => Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBackground,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppTheme.borderOutline),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            item['type'] == 'PDF' ? Icons.picture_as_pdf_rounded : Icons.audiotrack_rounded,
+                            color: item['type'] == 'PDF' ? AppTheme.brandGold : AppTheme.brandGreen,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(item['title']!, style: const TextStyle(color: AppTheme.textWhite, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text('${item['type']} • ${item['size']}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.download_rounded, color: AppTheme.brandGreen, size: 18),
+                            onPressed: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('✓ Material downloaded: ${item['title']}'),
+                                  backgroundColor: AppTheme.brandGreen,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

@@ -106,6 +106,8 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   final TextEditingController _homeworkController = TextEditingController();
   bool _isSavingNotes = false;
 
+  bool _hasBroadcastEnded = false;
+
   @override
   void initState() {
     super.initState();
@@ -113,10 +115,37 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _startSessionTimer();
     _initDeviceCamera();
     _initAgoraAndMedia();
+    _broadcastLiveStart();
+  }
+
+  Future<void> _broadcastLiveStart() async {
+    try {
+      await TeacherSupabaseService.instance.startLiveBroadcast(
+        sessionId: widget.session.id,
+        studioRoom: widget.session.studio,
+        topic: widget.session.topic.isNotEmpty ? widget.session.topic : widget.session.courseName,
+        studentId: widget.session.studentId.isNotEmpty ? widget.session.studentId : null,
+      );
+    } catch (e) {
+      debugPrint('[KMC Studio] Live start broadcast warning: $e');
+    }
+  }
+
+  Future<void> _broadcastLiveEnd() async {
+    if (_hasBroadcastEnded) return;
+    _hasBroadcastEnded = true;
+    try {
+      await TeacherSupabaseService.instance.endLiveBroadcast(
+        sessionId: widget.session.id,
+      );
+    } catch (e) {
+      debugPrint('[KMC Studio] Live end broadcast warning: $e');
+    }
   }
 
   @override
   void dispose() {
+    _broadcastLiveEnd();
     _sessionTimer?.cancel();
     _metronomeTimer?.cancel();
     _notesController.dispose();
@@ -502,6 +531,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
 
     if (shouldLeave == true && mounted) {
       await _saveLessonNotes();
+      await _broadcastLiveEnd();
       await _disposeAgora();
       if (mounted) {
         Navigator.of(context).pop();

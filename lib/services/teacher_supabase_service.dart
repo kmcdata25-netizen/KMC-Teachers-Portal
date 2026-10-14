@@ -888,7 +888,7 @@ class TeacherSupabaseService {
     if (client == null) return false;
 
     try {
-      final roomSlug = 'studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+      final roomSlug = 'kmc_studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
       await client.from('live_sessions').insert({
         'teacher_id': teacherId,
         'student_id': studentId,
@@ -900,9 +900,104 @@ class TeacherSupabaseService {
         'instructor_notes': topic,
         'created_at': DateTime.now().toIso8601String(),
       });
+
+      // Dispatch direct real-time notification to the student
+      try {
+        final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
+        final formattedDate = '${scheduledAt.day}/${scheduledAt.month} @ ${scheduledAt.hour.toString().padLeft(2, '0')}:${scheduledAt.minute.toString().padLeft(2, '0')}';
+        await client.from('notifications').insert({
+          'sender_name': teacherName,
+          'sender_role': 'teacher',
+          'recipient_type': 'individual_student',
+          'recipient_id': studentId,
+          'title': 'Studio Lesson Scheduled: $topic',
+          'message': 'Your 1-on-1 session in $studioRoom with $teacherName has been booked for $formattedDate.',
+          'category': 'lesson',
+          'action_url': '/live-classroom',
+          'is_read': false,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      } catch (notifErr) {
+        debugPrint('[TeacherApp] Notice dispatch warning: $notifErr');
+      }
+
       return true;
     } catch (e) {
       debugPrint('[TeacherApp] Schedule session notice: $e');
+      return false;
+    }
+  }
+
+  /// Broadcast "Live Now" to Central Mind live_sessions and push real-time alert to students
+  Future<bool> startLiveBroadcast({
+    required String sessionId,
+    required String studioRoom,
+    required String topic,
+    String? studentId,
+  }) async {
+    final client = _client;
+    if (client == null) return false;
+
+    try {
+      final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
+      final roomSlug = 'kmc_studio_${studioRoom.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}';
+
+      // 1. Update session status in live_sessions or insert if ad-hoc studio session
+      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo')) {
+        await client.from('live_sessions').update({
+          'status': 'live',
+        }).eq('id', sessionId);
+      } else {
+        final teacherId = _activeTeacher?.teacherTableId.isNotEmpty == true
+            ? _activeTeacher!.teacherTableId
+            : (_activeTeacher?.id ?? '');
+        await client.from('live_sessions').insert({
+          if (teacherId.isNotEmpty) 'teacher_id': teacherId,
+          if (studentId != null && studentId.isNotEmpty) 'student_id': studentId,
+          'scheduled_at': DateTime.now().toIso8601String(),
+          'agora_channel_name': roomSlug,
+          'jitsi_room_name': studioRoom,
+          'status': 'live',
+          'instructor_notes': topic.isNotEmpty ? topic : 'Live Masterclass Practice Lab',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+
+      // 2. Dispatch real-time live alert into notifications table
+      await client.from('notifications').insert({
+        'sender_name': teacherName,
+        'sender_role': 'teacher',
+        'recipient_type': (studentId != null && studentId.isNotEmpty) ? 'individual_student' : 'all_students',
+        'recipient_id': studentId,
+        'title': '🔴 LIVE NOW: $teacherName in $studioRoom',
+        'message': 'Masterclass "$topic" is now streaming live in $studioRoom. Tap to join the live studio!',
+        'category': 'masterclass',
+        'action_url': '/live-classroom',
+        'is_read': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      return true;
+    } catch (e) {
+      debugPrint('[TeacherApp] Start live broadcast error: $e');
+      return false;
+    }
+  }
+
+  /// Mark live session as completed when teacher concludes masterclass
+  Future<bool> endLiveBroadcast({required String sessionId}) async {
+    final client = _client;
+    if (client == null) return false;
+
+    try {
+      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo')) {
+        await client.from('live_sessions').update({
+          'status': 'completed',
+        }).eq('id', sessionId);
+      }
+      return true;
+    } catch (e) {
+      debugPrint('[TeacherApp] End live broadcast error: $e');
       return false;
     }
   }

@@ -4,6 +4,7 @@ import 'teacher_schedule_screen.dart';
 import 'teacher_students_screen.dart';
 import 'teacher_submissions_screen.dart';
 import 'teacher_profile_screen.dart';
+import 'teacher_notifications_screen.dart';
 import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
 import '../services/teacher_update_service.dart';
@@ -31,6 +32,13 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
     super.initState();
     _currentIndex = widget.initialTabIndex;
     _checkPendingReviews();
+    TeacherNotificationService.instance.onNotificationClicked = (payload) {
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const TeacherNotificationsScreen()),
+        );
+      }
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForUpdates();
     });
@@ -135,6 +143,59 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
           ],
         ),
         actions: [
+          ValueListenableBuilder<int>(
+            valueListenable: TeacherNotificationService.instance.unreadCountNotifier,
+            builder: (context, unreadCount, _) {
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    tooltip: unreadCount > 0
+                        ? 'Faculty Announcements ($unreadCount unread)'
+                        : 'Faculty Announcements',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const TeacherNotificationsScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.notifications_outlined, color: AppTheme.textWhite, size: 22),
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.brandGreen,
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(color: AppTheme.surfaceCard, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.brandGreen.withValues(alpha: 0.5),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Faculty Profile & Settings',
             onPressed: () async {

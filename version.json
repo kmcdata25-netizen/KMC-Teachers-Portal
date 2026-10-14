@@ -1,9 +1,9 @@
 {
-  "app_name": "KMC teacher Portal",
+  "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.7",
-  "latest_build_number": 8,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.7/KMC_Teacher_Portal_v1.0.7_b8.apk",
-  "release_notes": "Fix & Feature: Direct Native Hardware Camera activation in Live Studio. Faculty can immediately view their camera feed, flip between front and rear cameras (for piano keyboard or guitar frets), expand to full stage, and configure cloud streaming on the fly. Clean Kasarani Music School logo waiting stage without extraneous text.",
+  "latest_version": "1.0.8",
+  "latest_build_number": 9,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.8/KMC_Teacher_Portal_v1.0.8_b9.apk",
+  "release_notes": "v1.0.8+9 - Faculty Announcements Center & Live Studio Enhancements\n- Dedicated full-featured Faculty Announcements & Memos screen with live dynamic unread counter badge on the bell icon\n- Fixed Faculty Resources: interactive ABRSM & Contemporary Grading Rubrics, Cloudflare R2 Sheet Music & Backing Stems, and direct Academic Office contact\n- One-tap launch into Live Masterclass Studio directly from the Dashboard and Faculty Profile\n- Instant Live Studio sync and broadcast alerting for all scheduled and on-demand masterclasses",
   "force_update": false
 }

@@ -27,6 +27,17 @@ class TeacherNotificationService {
   final Set<String> _seenNoticeIds = {};
   static const String _prefsSeenKey = 'kmc_teacher_seen_notices_v1';
 
+  final Set<String> _readNoticeIds = {};
+  static const String _prefsReadKey = 'kmc_teacher_read_notices_v1';
+
+  /// Reactive notifier for total unread notices (powers UI badges without polling)
+  final ValueNotifier<int> unreadCountNotifier = ValueNotifier<int>(0);
+
+  List<Map<String, dynamic>> _cachedAnnouncements = [];
+
+  /// Global callback for when a native Android notification is tapped
+  void Function(String? payload)? onNotificationClicked;
+
   /// Android channel details for Kasarani Music Center Faculty Broadcasts
   static const String channelId = 'kmc_teacher_broadcasts';
   static const String channelName = 'KMC Faculty Announcements & Notices';
@@ -325,25 +336,176 @@ class TeacherNotificationService {
         subText: '$sender • $category',
       );
     }
+
+    // Insert into cached announcements and refresh unread counter
+    final existingIdx = _cachedAnnouncements.indexWhere((item) => item['id']?.toString() == rawId);
+    final enriched = Map<String, dynamic>.from(notice);
+    enriched['is_read_local'] = _readNoticeIds.contains(rawId);
+    if (existingIdx != -1) {
+      _cachedAnnouncements[existingIdx] = enriched;
+    } else {
+      _cachedAnnouncements.insert(0, enriched);
+    }
+    _updateUnreadCount();
+  }
+
+  void _updateUnreadCount() {
+    if (_cachedAnnouncements.isEmpty) {
+      unreadCountNotifier.value = 0;
+      return;
+    }
+    final count = _cachedAnnouncements.where((m) {
+      final id = m['id']?.toString() ?? '';
+      return id.isNotEmpty && !_readNoticeIds.contains(id);
+    }).length;
+    unreadCountNotifier.value = count;
+  }
+
+  bool isNoticeRead(String id) => _readNoticeIds.contains(id);
+
+  Future<void> markNoticeAsRead(String id) async {
+    _readNoticeIds.add(id);
+    await _saveReadNoticeIds();
+    for (var m in _cachedAnnouncements) {
+      if (m['id']?.toString() == id) {
+        m['is_read_local'] = true;
+      }
+    }
+    _updateUnreadCount();
+  }
+
+  Future<void> markAllAsRead(List<String> ids) async {
+    _readNoticeIds.addAll(ids);
+    await _saveReadNoticeIds();
+    for (var m in _cachedAnnouncements) {
+      m['is_read_local'] = true;
+    }
+    unreadCountNotifier.value = 0;
+  }
+
+  /// Fetches all active faculty notices, broadcasts, and administration memos.
+  Future<List<Map<String, dynamic>>> fetchFacultyAnnouncements({bool forceRefresh = false}) async {
+    if (!TeacherSupabaseConfig.isInitialized) return _cachedAnnouncements;
+
+    try {
+      final client = TeacherSupabaseConfig.client;
+      final res = await client
+          .from('notifications')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(40);
+
+      final list = res as List;
+      final results = <Map<String, dynamic>>[];
+
+      for (final row in list) {
+        final m = Map<String, dynamic>.from(row as Map);
+        final rawId = m['id']?.toString() ?? '';
+        final recipientType = m['recipient_type']?.toString().toLowerCase() ?? 'all';
+        final recipientId = m['recipient_id']?.toString() ?? '';
+        final recipientName = m['recipient_name']?.toString() ?? '';
+        final secRecipientId = m['secondary_recipient_id']?.toString() ?? '';
+
+        bool isForFaculty = false;
+        if (recipientType == 'all' ||
+            recipientType == 'everyone' ||
+            recipientType == 'faculty' ||
+            recipientType == 'all_faculty') {
+          isForFaculty = true;
+        } else if (recipientType == 'individual_teacher' ||
+            recipientType == 'single' ||
+            recipientType == 'teacher') {
+          if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
+            isForFaculty = (recipientId == _currentTeacherId ||
+                recipientName.toLowerCase() == _currentFacultyCode?.toLowerCase());
+          } else {
+            isForFaculty = true;
+          }
+        } else if (recipientType == 'pair') {
+          if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
+            isForFaculty = (recipientId == _currentTeacherId ||
+                secRecipientId == _currentTeacherId);
+          } else {
+            isForFaculty = true;
+          }
+        } else {
+          final cat = m['category']?.toString().toLowerCase() ?? '';
+          if (cat == 'masterclass' || cat == 'general' || cat == 'academic') {
+            isForFaculty = true;
+          }
+        }
+
+        if (isForFaculty) {
+          m['is_read_local'] = _readNoticeIds.contains(rawId);
+          results.add(m);
+        }
+      }
+
+      // Fallback to active promotions if notifications table is empty
+      if (results.isEmpty) {
+        try {
+          final promoRes = await client
+              .from('promotions')
+              .select()
+              .eq('is_active', true)
+              .order('created_at', ascending: false)
+              .limit(10);
+          final pList = promoRes as List;
+          for (final p in pList) {
+            final pm = Map<String, dynamic>.from(p as Map);
+            final pId = pm['id']?.toString() ?? 'promo_${results.length}';
+            results.add({
+              'id': pId,
+              'title': pm['title']?.toString() ?? 'KMC Faculty Memo',
+              'message': pm['subtitle']?.toString() ?? (pm['description']?.toString() ?? ''),
+              'category': 'Official Notice',
+              'sender_name': 'KMC Academic Office',
+              'created_at': pm['created_at'],
+              'is_read_local': _readNoticeIds.contains(pId),
+            });
+          }
+        } catch (_) {}
+      }
+
+      _cachedAnnouncements = results;
+      _updateUnreadCount();
+      return results;
+    } catch (e) {
+      debugPrint('[Teacher Notifications] fetchFacultyAnnouncements error: $e');
+      return _cachedAnnouncements;
+    }
   }
 
   Future<void> _loadSeenNoticeIds() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final list = prefs.getStringList(_prefsSeenKey) ?? [];
-      _seenNoticeIds.addAll(list);
+      final seenList = prefs.getStringList(_prefsSeenKey) ?? [];
+      _seenNoticeIds.addAll(seenList);
+
+      final readList = prefs.getStringList(_prefsReadKey) ?? [];
+      _readNoticeIds.addAll(readList);
     } catch (_) {}
   }
 
   Future<void> _saveSeenNoticeIds() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Keep at most 200 IDs in storage
       final toSave = _seenNoticeIds.toList();
       if (toSave.length > 200) {
         toSave.removeRange(0, toSave.length - 200);
       }
       await prefs.setStringList(_prefsSeenKey, toSave);
+    } catch (_) {}
+  }
+
+  Future<void> _saveReadNoticeIds() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final toSave = _readNoticeIds.toList();
+      if (toSave.length > 200) {
+        toSave.removeRange(0, toSave.length - 200);
+      }
+      await prefs.setStringList(_prefsReadKey, toSave);
     } catch (_) {}
   }
 
