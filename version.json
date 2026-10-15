@@ -2,8 +2,8 @@
   "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
   "latest_version": "1.0.8",
-  "latest_build_number": 11,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.8/KMC_Teacher_Portal_v1.0.8_b11.apk",
-  "release_notes": "v1.0.8+11 - Native Agora RTC Camera Integration & Real-Time Connection HUD\n- Direct Agora RTC C++/NDK native hardware camera driver (eliminated Android camera lock)\n- Fully automated zero-click entry (removed manual 32-character key modal)\n- Real-time Connection Telemetry HUD pill (latency, 2/2 participant count, live ping)\n- Tap-to-open Agora Connection Inspector modal for latency, bitrates, audio engine, and token security\n- Normalized studio room channels to guarantee teacher & student land in the exact same Agora room",
+  "latest_build_number": 12,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.8/KMC_Teacher_Portal_v1.0.8_b12.apk",
+  "release_notes": "v1.0.8+12 - Live Masterclass Room Sync & Session Dispatch Fixes\n- Synchronized studio room channel names between teacher studio and student classroom\n- Streamlined live_sessions database dispatch with strict UUID schema compliance\n- Reliable live alerts broadcast to students on masterclass launch\n- Native Agora RTC hardware video and Connection Telemetry HUD",
   "force_update": false
 }

@@ -108,6 +108,8 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   bool _isSavingNotes = false;
 
   bool _hasBroadcastEnded = false;
+  String? _liveRowId;
+  Future<void>? _liveStartFuture;
 
   @override
   void initState() {
@@ -115,12 +117,12 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _notesController.text = widget.session.notes;
     _startSessionTimer();
     _initAgoraAndMedia();
-    _broadcastLiveStart();
+    _liveStartFuture = _broadcastLiveStart();
   }
 
   Future<void> _broadcastLiveStart() async {
     try {
-      await TeacherSupabaseService.instance.startLiveBroadcast(
+      _liveRowId = await TeacherSupabaseService.instance.startLiveBroadcast(
         sessionId: widget.session.id,
         studioRoom: widget.session.studio,
         topic: widget.session.topic.isNotEmpty ? widget.session.topic : widget.session.courseName,
@@ -128,6 +130,19 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
         studentProfileId: widget.session.studentProfileId.isNotEmpty ? widget.session.studentProfileId : null,
         studentName: widget.session.studentName.isNotEmpty ? widget.session.studentName : null,
       );
+      if (_liveRowId == null) {
+        debugPrint('[KMC Studio] WARNING: live_sessions row was NOT marked live; students cannot auto-discover this room.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not publish this live class to students. Check your connection and reopen the studio.'),
+              backgroundColor: Color(0xFF5A1A1A),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 6),
+            ),
+          );
+        }
+      }
     } catch (e) {
       debugPrint('[KMC Studio] Live start broadcast warning: $e');
     }
@@ -137,8 +152,11 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     if (_hasBroadcastEnded) return;
     _hasBroadcastEnded = true;
     try {
+      // Make sure the start write has landed so we close the right row.
+      await _liveStartFuture;
+      final rowId = _liveRowId ?? widget.session.id;
       await TeacherSupabaseService.instance.endLiveBroadcast(
-        sessionId: widget.session.id,
+        sessionId: rowId,
       );
     } catch (e) {
       debugPrint('[KMC Studio] Live end broadcast warning: $e');
@@ -306,9 +324,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
 
       // 5. Join Canonical Studio Channel with pre-minted Token 2.0
       final channel = widget.session.effectiveChannelName;
-      final token = widget.session.agoraToken.isNotEmpty
-          ? widget.session.agoraToken
-          : AgoraConfig.generateRtcToken(channelName: channel, uid: 0);
+      final token = AgoraConfig.generateRtcToken(channelName: channel, uid: 0);
 
       await _engine!.joinChannel(
         token: token,

@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../config/agora_config.dart';
 import '../config/supabase_config.dart';
 import '../data/mock_teacher_data.dart';
 
@@ -895,14 +894,14 @@ class TeacherSupabaseService {
 
     try {
       final roomSlug = KmcChannelHelper.sanitize(studioRoom);
-      final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
+      // NOTE: live_sessions has no agora_token column. Tokens are minted on-device
+      // at join time for the canonical channel, so we never persist them.
       await client.from('live_sessions').insert({
         'teacher_id': teacherId,
         'student_id': studentId,
         if (courseId != null && courseId.isNotEmpty) 'course_id': courseId,
         'scheduled_at': scheduledAt.toIso8601String(),
         'agora_channel_name': roomSlug,
-        'agora_token': agoraToken,
         'jitsi_room_name': studioRoom,
         'status': 'scheduled',
         'instructor_notes': topic,
@@ -938,8 +937,17 @@ class TeacherSupabaseService {
     }
   }
 
-  /// Broadcast "Live Now" to Central Mind live_sessions and push real-time alert to students
-  Future<bool> startLiveBroadcast({
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
+  static bool _isUuid(String? value) => value != null && _uuidPattern.hasMatch(value);
+
+  /// Broadcast "Live Now" to Central Mind live_sessions and push real-time alert to students.
+  ///
+  /// Returns the id of the `live_sessions` row that is now `live` (so the caller can
+  /// mark exactly that row `completed` later), or `null` if the database write failed.
+  Future<String?> startLiveBroadcast({
     required String sessionId,
     required String studioRoom,
     required String topic,
@@ -948,55 +956,74 @@ class TeacherSupabaseService {
     String? studentName,
   }) async {
     final client = _client;
-    if (client == null) return false;
+    if (client == null) return null;
+
+    String? liveRowId;
+    final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
+    final roomSlug = KmcChannelHelper.sanitize(studioRoom);
 
     try {
-      final teacherName = _activeTeacher?.name ?? 'KMC Faculty Master';
-      final roomSlug = KmcChannelHelper.sanitize(studioRoom);
-      final agoraToken = AgoraConfig.generateRtcToken(channelName: roomSlug, uid: 0);
-
-      // 1. Update session status in live_sessions or insert if ad-hoc studio session
-      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo') && !sessionId.startsWith('live_studio_')) {
-        await client.from('live_sessions').update({
-          'status': 'live',
-          'agora_channel_name': roomSlug,
-          'agora_token': agoraToken,
-          'jitsi_room_name': studioRoom,
-        }).eq('id', sessionId);
-      } else {
-        final teacherId = _activeTeacher?.teacherTableId.isNotEmpty == true
-            ? _activeTeacher!.teacherTableId
-            : (_activeTeacher?.id ?? '');
-        final targetStudentId = (studentProfileId != null && studentProfileId.isNotEmpty)
-            ? studentProfileId
-            : (studentId != null && studentId.isNotEmpty && studentId != 'STUDIO-OPEN' ? studentId : null);
-
-        await client.from('live_sessions').insert({
-          if (teacherId.isNotEmpty) 'teacher_id': teacherId,
-          if (targetStudentId != null) 'student_id': targetStudentId,
-          'scheduled_at': DateTime.now().toIso8601String(),
-          'agora_channel_name': roomSlug,
-          'agora_token': agoraToken,
-          'jitsi_room_name': studioRoom,
-          'status': 'live',
-          'instructor_notes': topic.isNotEmpty ? topic : 'Live Masterclass Practice Lab',
-          'created_at': DateTime.now().toIso8601String(),
-        });
+      // 1. Flip an existing scheduled row to live. Only real UUID rows can match;
+      //    local schedule ids (e.g. 'tc_101') would make Postgres reject the filter.
+      if (_isUuid(sessionId)) {
+        final updated = await client
+            .from('live_sessions')
+            .update({
+              'status': 'live',
+              'agora_channel_name': roomSlug,
+              'jitsi_room_name': studioRoom,
+            })
+            .eq('id', sessionId)
+            .select('id');
+        if ((updated as List).isNotEmpty) {
+          liveRowId = updated.first['id']?.toString();
+        }
       }
 
-      final isOpenMasterclass = studentId == null ||
-          studentId.isEmpty ||
-          studentId == 'STUDIO-OPEN' ||
-          studentId.toLowerCase() == 'all';
+      // 2. Ad-hoc studio session (or the update matched nothing): insert a fresh live row.
+      if (liveRowId == null) {
+        final rawTeacherId = _activeTeacher?.teacherTableId.isNotEmpty == true
+            ? _activeTeacher!.teacherTableId
+            : (_activeTeacher?.id ?? '');
+        // student_id is a UUID FK to profiles; admission numbers like 'KMC-2026-1042'
+        // would fail the insert, so they fall back to an open (student_id = null) room.
+        final targetStudentId = _isUuid(studentProfileId)
+            ? studentProfileId
+            : (_isUuid(studentId) ? studentId : null);
 
-      // 2. Dispatch real-time live alert into notifications table
+        final inserted = await client
+            .from('live_sessions')
+            .insert({
+              if (_isUuid(rawTeacherId)) 'teacher_id': rawTeacherId,
+              'student_id': targetStudentId,
+              'scheduled_at': DateTime.now().toUtc().toIso8601String(),
+              'agora_channel_name': roomSlug,
+              'jitsi_room_name': studioRoom,
+              'status': 'live',
+              'instructor_notes': topic.isNotEmpty ? topic : 'Live Masterclass Practice Lab',
+            })
+            .select('id')
+            .single();
+        liveRowId = inserted['id']?.toString();
+      }
+      debugPrint('[TeacherApp] Live broadcast row $liveRowId is LIVE on channel $roomSlug');
+    } catch (e) {
+      debugPrint('[TeacherApp] Start live broadcast DB error: $e');
+      return null;
+    }
+
+    // 3. Notification is best-effort: a failure here must not hide a successful live row.
+    try {
+      final isOpenMasterclass = !_isUuid(studentProfileId) && !_isUuid(studentId);
+
+      // Dispatch real-time live alert into notifications table
       await client.from('notifications').insert({
         'sender_name': teacherName,
         'sender_role': 'teacher',
         'recipient_type': isOpenMasterclass ? 'all_students' : 'individual_student',
         'recipient_id': isOpenMasterclass
             ? null
-            : (studentProfileId != null && studentProfileId.isNotEmpty ? studentProfileId : studentId),
+            : (_isUuid(studentProfileId) ? studentProfileId : studentId),
         'recipient_name': studentName,
         'secondary_recipient_id': isOpenMasterclass ? null : studentId,
         'title': '🔴 LIVE NOW: $teacherName in $studioRoom',
@@ -1006,12 +1033,11 @@ class TeacherSupabaseService {
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-
-      return true;
     } catch (e) {
-      debugPrint('[TeacherApp] Start live broadcast error: $e');
-      return false;
+      debugPrint('[TeacherApp] Live alert notification warning: $e');
     }
+
+    return liveRowId;
   }
 
   /// Mark live session as completed when teacher concludes masterclass
@@ -1020,7 +1046,7 @@ class TeacherSupabaseService {
     if (client == null) return false;
 
     try {
-      if (sessionId.isNotEmpty && !sessionId.startsWith('mock-') && !sessionId.startsWith('sess-demo')) {
+      if (_isUuid(sessionId)) {
         await client.from('live_sessions').update({
           'status': 'completed',
         }).eq('id', sessionId);

@@ -125,8 +125,12 @@ class TeacherClass {
     this.agoraToken = '',
   });
 
-  String get effectiveChannelName =>
-      agoraChannelName.isNotEmpty ? agoraChannelName : KmcChannelHelper.sanitize(studio);
+  /// Canonical Agora channel. Must match the student app's
+  /// `LiveSessionModel.effectiveChannelName` exactly: both are derived from the
+  /// studio name, never from legacy stored channel strings.
+  String get effectiveChannelName => KmcChannelHelper.sanitize(
+        studio.trim().isNotEmpty ? studio : agoraChannelName,
+      );
 }
 
 class StudentRosterItem {
