@@ -34,7 +34,11 @@ class KmcWebRtcService {
   bool _isInitialized = false;
   bool _isRemoteDescriptionSet = false;
 
+  RTCSessionDescription? _myOffer;
+  RTCSessionDescription? _myAnswer;
+  final List<RTCIceCandidate> _myIceCandidates = [];
   final List<RTCIceCandidate> _pendingIceCandidates = [];
+  Timer? _presenceTimer;
 
   bool get isAudioMuted => _isAudioMuted;
   bool get isVideoMuted => _isVideoMuted;
@@ -68,7 +72,11 @@ class KmcWebRtcService {
     isInstructor = isHost;
     currentSessionId = sessionId;
     _isRemoteDescriptionSet = false;
+    _myOffer = null;
+    _myAnswer = null;
+    _myIceCandidates.clear();
     _pendingIceCandidates.clear();
+    _presenceTimer?.cancel();
 
     await initializeRenderers();
 
@@ -139,6 +147,7 @@ class KmcWebRtcService {
       connectionState.value = state;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         isRemoteConnected.value = true;
+        _presenceTimer?.cancel();
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
@@ -151,121 +160,19 @@ class KmcWebRtcService {
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         isRemoteConnected.value = true;
+        _presenceTimer?.cancel();
       }
     };
 
-    // 3. Connect Supabase Realtime Signaling Channel
-    final channelName = 'kmc_webrtc_${sessionId.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}';
-    _signalingChannel = _supabase.channel(channelName);
-
-    _signalingChannel!.onBroadcast(event: 'signal', callback: (payload) async {
-      final type = payload['type'] as String?;
-      final senderRole = payload['role'] as String?;
-
-      // Ignore messages from self
-      if ((isInstructor && senderRole == 'teacher') ||
-          (!isInstructor && senderRole == 'student')) {
-        return;
-      }
-
-      debugPrint('[KmcWebRtc] Signal received: type=$type from=$senderRole');
-
-      if (type == 'ready') {
-        // If peer announces readiness and we are the host, send an offer
-        if (isInstructor) {
-          debugPrint('[KmcWebRtc] Peer ready detected. Sending fresh SDP Offer.');
-          await _createAndSendOffer();
-        }
-      } else if (type == 'offer' && !isInstructor) {
-        // Student receives Teacher's offer
-        final sdp = payload['sdp'] as String;
-        final description = RTCSessionDescription(sdp, 'offer');
-        await _peerConnection!.setRemoteDescription(description);
-        _isRemoteDescriptionSet = true;
-        await _flushPendingIceCandidates();
-
-        // Create answer
-        var answer = await _peerConnection!.createAnswer({
-          'offerToReceiveAudio': true,
-          'offerToReceiveVideo': true,
-        });
-
-        final optimizedSdp = _optimizeSdpForMusic(answer.sdp ?? '');
-        answer = RTCSessionDescription(optimizedSdp, answer.type);
-        await _peerConnection!.setLocalDescription(answer);
-
-        _signalingChannel!.sendBroadcastMessage(
-          event: 'signal',
-          payload: {
-            'type': 'answer',
-            'sdp': answer.sdp,
-            'role': 'student',
-          },
-        );
-      } else if (type == 'answer' && isInstructor) {
-        // Teacher receives Student's answer
-        final sdp = payload['sdp'] as String;
-        final description = RTCSessionDescription(sdp, 'answer');
-        await _peerConnection!.setRemoteDescription(description);
-        _isRemoteDescriptionSet = true;
-        await _flushPendingIceCandidates();
-      } else if (type == 'candidate') {
-        final candidateMap = payload['candidate'] as Map<String, dynamic>?;
-        if (candidateMap != null) {
-          final candidate = RTCIceCandidate(
-            candidateMap['candidate'],
-            candidateMap['sdpMid'],
-            candidateMap['sdpMLineIndex'],
-          );
-
-          if (_isRemoteDescriptionSet) {
-            await _peerConnection!.addCandidate(candidate);
-          } else {
-            _pendingIceCandidates.add(candidate);
-          }
-        }
-      } else if (type == 'proctor-join') {
-        debugPrint('[KmcWebRtc] Proctor join detected. Preparing observation stream.');
-        await _handleProctorJoin();
-      } else if (type == 'proctor-answer') {
-        final target = payload['target'] as String?;
-        final myRole = isInstructor ? 'teacher' : 'student';
-        if (target == myRole) {
-          final sdp = payload['sdp'] as String;
-          final description = RTCSessionDescription(sdp, 'answer');
-          await _proctorPeerConnection?.setRemoteDescription(description);
-          debugPrint('[KmcWebRtc] Proctor answer set successfully for $myRole.');
-        }
-      } else if (type == 'proctor-candidate') {
-        final target = payload['target'] as String?;
-        final myRole = isInstructor ? 'teacher' : 'student';
-        if (target == myRole) {
-          final candidateMap = payload['candidate'] as Map<String, dynamic>?;
-          if (candidateMap != null) {
-            final candidate = RTCIceCandidate(
-              candidateMap['candidate'],
-              candidateMap['sdpMid'],
-              candidateMap['sdpMLineIndex'],
-            );
-            await _proctorPeerConnection?.addCandidate(candidate);
-          }
-        }
-      } else if (type == 'proctor-leave') {
-        debugPrint('[KmcWebRtc] Proctor left observation.');
-        await _proctorPeerConnection?.close();
-        _proctorPeerConnection = null;
-      }
-    });
-
-    _signalingChannel!.subscribe();
-
-    // 4. Send ICE candidates as they are discovered
+    // Store and trickle ICE candidates
     _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
+      _myIceCandidates.add(candidate);
       _signalingChannel?.sendBroadcastMessage(
         event: 'signal',
         payload: {
-          'type': 'candidate',
+          'signalType': 'candidate',
+          'msgType': 'candidate',
           'candidate': {
             'candidate': candidate.candidate,
             'sdpMid': candidate.sdpMid,
@@ -276,19 +183,254 @@ class KmcWebRtcService {
       );
     };
 
-    // 5. Announce presence to room
-    _signalingChannel!.sendBroadcastMessage(
+    // 3. Connect Supabase Realtime Signaling Channel
+    final channelName = 'kmc_webrtc_${sessionId.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}';
+    _signalingChannel = _supabase.channel(channelName);
+
+    _signalingChannel!.onBroadcast(event: 'signal', callback: (payload) async {
+      // Robust signal type extraction immune to Supabase internal envelopes
+      final signalType = payload['signalType'] as String? ??
+          payload['msgType'] as String? ??
+          payload['action'] as String? ??
+          (payload['type'] != null && payload['type'] != 'broadcast'
+              ? payload['type'] as String
+              : null);
+
+      final senderRole = payload['role'] as String?;
+
+      // Ignore messages from self
+      if ((isInstructor && senderRole == 'teacher') ||
+          (!isInstructor && senderRole == 'student')) {
+        return;
+      }
+
+      debugPrint('[KmcWebRtc] Signal received: signalType=$signalType from=$senderRole');
+
+      if (signalType == 'ready') {
+        debugPrint('[KmcWebRtc] Peer ready announcement from $senderRole.');
+        if (isInstructor) {
+          if (_myOffer != null) {
+            debugPrint('[KmcWebRtc] Resending existing SDP Offer to newly ready student.');
+            await _signalingChannel?.sendBroadcastMessage(
+              event: 'signal',
+              payload: {
+                'signalType': 'offer',
+                'msgType': 'offer',
+                'sdp': _myOffer!.sdp,
+                'role': 'teacher',
+              },
+            );
+            _sendAllGatheredCandidates();
+          } else {
+            await _createAndSendOffer();
+          }
+        } else {
+          // If student has already answered, re-send answer & candidates
+          if (_myAnswer != null) {
+            await _signalingChannel?.sendBroadcastMessage(
+              event: 'signal',
+              payload: {
+                'signalType': 'answer',
+                'msgType': 'answer',
+                'sdp': _myAnswer!.sdp,
+                'role': 'student',
+              },
+            );
+            _sendAllGatheredCandidates();
+          }
+        }
+      } else if (signalType == 'offer' && !isInstructor) {
+        // Student receives Teacher's offer
+        final sdp = payload['sdp'] as String?;
+        if (sdp != null) {
+          debugPrint('[KmcWebRtc] Student setting remote description from Teacher Offer...');
+          final description = RTCSessionDescription(sdp, 'offer');
+          await _peerConnection!.setRemoteDescription(description);
+          _isRemoteDescriptionSet = true;
+          await _flushPendingIceCandidates();
+
+          // Create answer
+          var answer = await _peerConnection!.createAnswer({
+            'offerToReceiveAudio': true,
+            'offerToReceiveVideo': true,
+          });
+
+          final optimizedSdp = _optimizeSdpForMusic(answer.sdp ?? '');
+          answer = RTCSessionDescription(optimizedSdp, answer.type);
+          await _peerConnection!.setLocalDescription(answer);
+          _myAnswer = answer;
+
+          await _signalingChannel?.sendBroadcastMessage(
+            event: 'signal',
+            payload: {
+              'signalType': 'answer',
+              'msgType': 'answer',
+              'sdp': answer.sdp,
+              'role': 'student',
+            },
+          );
+          debugPrint('[KmcWebRtc] Student dispatched SDP Answer.');
+          _sendAllGatheredCandidates();
+        }
+      } else if (signalType == 'answer' && isInstructor) {
+        // Teacher receives Student's answer
+        final sdp = payload['sdp'] as String?;
+        if (sdp != null) {
+          debugPrint('[KmcWebRtc] Teacher setting remote description from Student Answer...');
+          final description = RTCSessionDescription(sdp, 'answer');
+          await _peerConnection!.setRemoteDescription(description);
+          _isRemoteDescriptionSet = true;
+          await _flushPendingIceCandidates();
+          _sendAllGatheredCandidates();
+          debugPrint('[KmcWebRtc] Remote description established. P2P flow active.');
+        }
+      } else if (signalType == 'candidate') {
+        final candidateMap = payload['candidate'] as Map<String, dynamic>?;
+        if (candidateMap != null) {
+          final candidate = RTCIceCandidate(
+            candidateMap['candidate'],
+            candidateMap['sdpMid'],
+            candidateMap['sdpMLineIndex'],
+          );
+
+          if (_isRemoteDescriptionSet) {
+            try {
+              await _peerConnection!.addCandidate(candidate);
+            } catch (e) {
+              debugPrint('[KmcWebRtc] Add candidate error: $e');
+            }
+          } else {
+            _pendingIceCandidates.add(candidate);
+          }
+        }
+      } else if (signalType == 'candidates-batch') {
+        final batch = payload['candidates'] as List<dynamic>?;
+        if (batch != null) {
+          for (final item in batch) {
+            if (item is Map) {
+              final candidate = RTCIceCandidate(
+                item['candidate'],
+                item['sdpMid'],
+                item['sdpMLineIndex'],
+              );
+              if (_isRemoteDescriptionSet) {
+                try {
+                  await _peerConnection!.addCandidate(candidate);
+                } catch (_) {}
+              } else {
+                _pendingIceCandidates.add(candidate);
+              }
+            }
+          }
+          if (_isRemoteDescriptionSet) {
+            await _flushPendingIceCandidates();
+          }
+        }
+      } else if (signalType == 'proctor-join') {
+        debugPrint('[KmcWebRtc] Proctor join detected. Preparing observation stream.');
+        await _handleProctorJoin();
+      } else if (signalType == 'proctor-answer') {
+        final target = payload['target'] as String?;
+        final myRole = isInstructor ? 'teacher' : 'student';
+        if (target == myRole || target == null) {
+          final sdp = payload['sdp'] as String?;
+          if (sdp != null) {
+            final description = RTCSessionDescription(sdp, 'answer');
+            await _proctorPeerConnection?.setRemoteDescription(description);
+            debugPrint('[KmcWebRtc] Proctor answer set successfully for $myRole.');
+          }
+        }
+      } else if (signalType == 'proctor-candidate') {
+        final target = payload['target'] as String?;
+        final myRole = isInstructor ? 'teacher' : 'student';
+        if (target == myRole || target == null) {
+          final candidateMap = payload['candidate'] as Map<String, dynamic>?;
+          if (candidateMap != null) {
+            final candidate = RTCIceCandidate(
+              candidateMap['candidate'],
+              candidateMap['sdpMid'],
+              candidateMap['sdpMLineIndex'],
+            );
+            await _proctorPeerConnection?.addCandidate(candidate);
+          }
+        }
+      } else if (signalType == 'proctor-leave') {
+        debugPrint('[KmcWebRtc] Proctor left observation.');
+        await _proctorPeerConnection?.close();
+        _proctorPeerConnection = null;
+      }
+    });
+
+    _signalingChannel!.subscribe((status, [error]) async {
+      debugPrint('[KmcWebRtc] Signaling subscription status: $status');
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        // Announce presence immediately
+        await _signalingChannel?.sendBroadcastMessage(
+          event: 'signal',
+          payload: {
+            'signalType': 'ready',
+            'msgType': 'ready',
+            'role': isInstructor ? 'teacher' : 'student',
+          },
+        );
+
+        if (isInstructor) {
+          await _createAndSendOffer();
+        }
+      }
+    });
+
+    // 4. Start periodic handshake keepalive (runs until connection established)
+    int attempts = 0;
+    _presenceTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      attempts++;
+      if (isRemoteConnected.value || attempts > 30 || _peerConnection == null) {
+        timer.cancel();
+        return;
+      }
+
+      debugPrint('[KmcWebRtc] Periodic presence heartbeat #$attempts...');
+      await _signalingChannel?.sendBroadcastMessage(
+        event: 'signal',
+        payload: {
+          'signalType': 'ready',
+          'msgType': 'ready',
+          'role': isInstructor ? 'teacher' : 'student',
+        },
+      );
+
+      if (isInstructor && _myOffer != null) {
+        await _signalingChannel?.sendBroadcastMessage(
+          event: 'signal',
+          payload: {
+            'signalType': 'offer',
+            'msgType': 'offer',
+            'sdp': _myOffer!.sdp,
+            'role': 'teacher',
+          },
+        );
+        _sendAllGatheredCandidates();
+      }
+    });
+  }
+
+  void _sendAllGatheredCandidates() {
+    if (_myIceCandidates.isEmpty || _signalingChannel == null) return;
+    final batchPayload = _myIceCandidates.map((c) => {
+      'candidate': c.candidate,
+      'sdpMid': c.sdpMid,
+      'sdpMLineIndex': c.sdpMLineIndex,
+    }).toList();
+
+    _signalingChannel?.sendBroadcastMessage(
       event: 'signal',
       payload: {
-        'type': 'ready',
+        'signalType': 'candidates-batch',
+        'msgType': 'candidates-batch',
+        'candidates': batchPayload,
         'role': isInstructor ? 'teacher' : 'student',
       },
     );
-
-    // If host (teacher), initiate the SDP Offer
-    if (isInstructor) {
-      await _createAndSendOffer();
-    }
   }
 
   Future<void> _createAndSendOffer() async {
@@ -302,16 +444,19 @@ class KmcWebRtcService {
       final optimizedSdp = _optimizeSdpForMusic(offer.sdp ?? '');
       offer = RTCSessionDescription(optimizedSdp, offer.type);
       await _peerConnection!.setLocalDescription(offer);
+      _myOffer = offer;
 
-      _signalingChannel?.sendBroadcastMessage(
+      await _signalingChannel?.sendBroadcastMessage(
         event: 'signal',
         payload: {
-          'type': 'offer',
+          'signalType': 'offer',
+          'msgType': 'offer',
           'sdp': offer.sdp,
           'role': 'teacher',
         },
       );
-      debugPrint('[KmcWebRtc] SDP Offer broadcasted.');
+      debugPrint('[KmcWebRtc] SDP Offer broadcasted with signalType=offer.');
+      _sendAllGatheredCandidates();
     } catch (e) {
       debugPrint('[KmcWebRtc] Error creating SDP Offer: $e');
     }
@@ -392,7 +537,8 @@ class KmcWebRtcService {
         _signalingChannel?.sendBroadcastMessage(
           event: 'signal',
           payload: {
-            'type': 'proctor-candidate',
+            'signalType': 'proctor-candidate',
+            'msgType': 'proctor-candidate',
             'sender': isInstructor ? 'teacher' : 'student',
             'candidate': {
               'candidate': candidate.candidate,
@@ -415,7 +561,8 @@ class KmcWebRtcService {
       _signalingChannel?.sendBroadcastMessage(
         event: 'signal',
         payload: {
-          'type': 'proctor-offer',
+          'signalType': 'proctor-offer',
+          'msgType': 'proctor-offer',
           'sender': isInstructor ? 'teacher' : 'student',
           'sdp': offer.sdp,
         },
@@ -429,6 +576,9 @@ class KmcWebRtcService {
   /// Cleanly close peer connections, stream tracks, and channel subscriptions
   Future<void> endSession() async {
     try {
+      _presenceTimer?.cancel();
+      _presenceTimer = null;
+
       await _signalingChannel?.unsubscribe();
       _signalingChannel = null;
 
@@ -448,14 +598,12 @@ class KmcWebRtcService {
 
       localRenderer.srcObject = null;
       remoteRenderer.srcObject = null;
-
-      await localRenderer.dispose();
-      await remoteRenderer.dispose();
-      _isInitialized = false;
-
       isRemoteConnected.value = false;
       isLocalStreamActive.value = false;
+      _myIceCandidates.clear();
       _pendingIceCandidates.clear();
+      _myOffer = null;
+      _myAnswer = null;
       _isRemoteDescriptionSet = false;
     } catch (e) {
       debugPrint('[KmcWebRtc] Cleanup error: $e');

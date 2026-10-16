@@ -1,9 +1,9 @@
 {
   "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.10",
-  "latest_build_number": 14,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.10/KMC_Teacher_Portal_v1.0.10_b14.apk",
-  "release_notes": "v1.0.10+14 - Pure Peer-to-Peer (P2P) WebRTC Studio Migration ($0.00/month Unmetered)\n- Replaced proprietary Agora RTC with native flutter_webrtc powered by Supabase Realtime broadcast signaling\n- High-fidelity acoustic music audio profile (Opus Stereo 48kHz, disabled aggressive noise suppression & auto gain control for natural piano/guitar resonance)\n- Removed legacy agora_rtc_engine binary dependency (drastically smaller APK)\n- Full support for Director Stealth Proctor observation and live intervention",
+  "latest_version": "1.0.11",
+  "latest_build_number": 15,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.11/KMC_Teacher_Portal_v1.0.11_b15.apk",
+  "release_notes": "v1.0.11+15 - Fix WebRTC Studio Signaling & Auto-Handshake Connection\n- Resolved Supabase Realtime broadcast payload type collision (signalType isolation)\n- Added automated signaling presence heartbeat and candidate batch synchronization\n- Seamless instantaneous audio/video connection between teacher and student studios\n- Native acoustic music audio profile (Opus Stereo 48kHz, disabled ANC/AGC for natural instrument resonance)",
   "force_update": false
 }
