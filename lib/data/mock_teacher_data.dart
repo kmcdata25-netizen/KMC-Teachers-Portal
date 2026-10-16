@@ -200,6 +200,8 @@ class StudentSubmission {
 
 class MockTeacherData {
   static const TeacherProfile currentTeacher = TeacherProfile(
+    id: 'd552a6f0-cb51-4d73-937e-14dd9f754fa7',
+    teacherTableId: 'd552a6f0-cb51-4d73-937e-14dd9f754fa7',
     name: 'David Otieno',
     title: 'Senior Piano & Composition Faculty',
     facultyId: 'KMC-FAC-014',
@@ -289,80 +291,8 @@ class MockTeacherData {
     ),
   ];
 
-  static List<StudentRosterItem> students = [
-    const StudentRosterItem(
-      id: 'st_01',
-      name: 'Brian Mwangi',
-      studentId: 'KMC-2026-1042',
-      course: 'Contemporary Jazz Piano',
-      instrument: 'Piano',
-      progressPercent: 0.68,
-      attendancePercent: 95,
-      completedLessons: 14,
-      nextClass: 'Today @ 10:00 AM',
-      lastLessonNote: 'Great left hand phrasing. Need to tighten metronome sync at 80 BPM.',
-    ),
-    const StudentRosterItem(
-      id: 'st_02',
-      name: 'Faith Wanjiku',
-      studentId: 'KMC-2026-1018',
-      course: 'Contemporary Jazz Piano',
-      instrument: 'Piano',
-      progressPercent: 0.85,
-      attendancePercent: 100,
-      completedLessons: 21,
-      nextClass: 'Today @ 11:30 AM',
-      lastLessonNote: 'Improvisation over ii-V-I turnaround is sounding mature and musical.',
-    ),
-    const StudentRosterItem(
-      id: 'st_03',
-      name: 'Kevin Kiprop',
-      studentId: 'KMC-2026-1055',
-      course: 'Music Theory & Harmony',
-      instrument: 'Theory',
-      progressPercent: 0.45,
-      attendancePercent: 88,
-      completedLessons: 8,
-      nextClass: 'Today @ 3:00 PM',
-      lastLessonNote: 'Struggling slightly with diminished 7th resolution; assign review drill.',
-    ),
-    const StudentRosterItem(
-      id: 'st_04',
-      name: 'Joy Achieng',
-      studentId: 'KMC-2026-1089',
-      course: 'Contemporary Jazz Piano',
-      instrument: 'Piano',
-      progressPercent: 0.32,
-      attendancePercent: 92,
-      completedLessons: 5,
-      nextClass: 'Today @ 4:30 PM',
-      lastLessonNote: 'Posture is improving. Work on thumb-under technique for C major scale.',
-    ),
-    const StudentRosterItem(
-      id: 'st_05',
-      name: 'Emmanuel Omondi',
-      studentId: 'KMC-2026-1022',
-      course: 'Contemporary Jazz Piano',
-      instrument: 'Piano',
-      progressPercent: 0.55,
-      attendancePercent: 90,
-      completedLessons: 11,
-      nextClass: 'Tomorrow @ 10:00 AM',
-      lastLessonNote: 'Mastered Autumn Leaves melody; transitioning to walking bass lines.',
-    ),
-    const StudentRosterItem(
-      id: 'st_06',
-      name: 'Priscilla Muthoni',
-      studentId: 'KMC-2026-1077',
-      course: 'Music Theory & Harmony',
-      instrument: 'Theory',
-      progressPercent: 0.72,
-      attendancePercent: 96,
-      completedLessons: 16,
-      nextClass: 'Tomorrow @ 2:00 PM',
-      lastLessonNote: 'Exam prep is on track. High marks on modulation exercises.',
-    ),
-  ];
+  // Student Roster (Permanently empty: Roster is 100% database-driven from Supabase Central Mind)
+  static List<StudentRosterItem> students = [];
 
   static List<StudentSubmission> submissions = [
     StudentSubmission(

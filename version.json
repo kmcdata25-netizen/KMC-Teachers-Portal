@@ -1,9 +1,9 @@
 {
   "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.8",
-  "latest_build_number": 12,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.8/KMC_Teacher_Portal_v1.0.8_b12.apk",
-  "release_notes": "v1.0.8+12 - Live Masterclass Room Sync & Session Dispatch Fixes\n- Synchronized studio room channel names between teacher studio and student classroom\n- Streamlined live_sessions database dispatch with strict UUID schema compliance\n- Reliable live alerts broadcast to students on masterclass launch\n- Native Agora RTC hardware video and Connection Telemetry HUD",
+  "latest_version": "1.0.9",
+  "latest_build_number": 13,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.9/KMC_Teacher_Portal_v1.0.9_b13.apk",
+  "release_notes": "v1.0.9+13 - Database-Driven Student Roster & Live Central Mind Metrics\n- Resolved genuine teacher-student studio assignments from Central Mind (Supabase)\n- Removed all phantom mock student fallbacks\n- Real-time attendance rate calculated from actual live session outcomes\n- Live syllabus mastery progress and dynamically formatted upcoming class schedules\n- Real instructor notes fetched directly from live studio sessions",
   "force_update": false
 }

@@ -41,7 +41,7 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _allStudents = MockTeacherData.students;
+          _allStudents = [];
           _isLoading = false;
         });
       }
