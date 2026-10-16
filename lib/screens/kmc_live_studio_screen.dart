@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../config/agora_config.dart';
 import '../data/mock_teacher_data.dart';
+import '../services/kmc_webrtc_service.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 
 /// Full Native In-App Virtual Music Studio for Kasarani Music Center Faculty.
-/// Provides native video/audio masterclass streaming via Agora RTC Engine,
+/// Provides pure peer-to-peer WebRTC video/audio masterclass streaming,
 /// interactive digital metronome, concert pitch tuner, sheet music drawer,
 /// and live session homework & notes synchronization with Central Mind.
 class KMCLiveStudioScreen extends StatefulWidget {
@@ -26,10 +26,10 @@ class KMCLiveStudioScreen extends StatefulWidget {
 
 class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     with SingleTickerProviderStateMixin {
-  // Agora RTC Engine State & Real-Time Telemetry
-  RtcEngine? _engine;
+  // WebRTC Service & Real-Time Telemetry
+  final KmcWebRtcService _webrtcService = KmcWebRtcService();
   bool _isJoined = false;
-  int _myUid = 1001;
+  final int _myUid = 1001;
   int? _remoteUid;
   bool _isAudioMuted = false;
   bool _isVideoMuted = false;
@@ -37,11 +37,8 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   bool _isLocalExpanded = false;
 
   // Real-Time Connection & Quality Telemetry
-  int _networkPingMs = 0;
+  final int _networkPingMs = 0;
   int _userCount = 1;
-  int _txBitrate = 0;
-  int _rxBitrate = 0;
-  RemoteVideoState _remoteVideoState = RemoteVideoState.remoteVideoStateStopped;
 
   // Session Duration Timer
   Timer? _sessionTimer;
@@ -116,7 +113,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     super.initState();
     _notesController.text = widget.session.notes;
     _startSessionTimer();
-    _initAgoraAndMedia();
+    _initWebRtcAndMedia();
     _liveStartFuture = _broadcastLiveStart();
   }
 
@@ -170,7 +167,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _metronomeTimer?.cancel();
     _notesController.dispose();
     _homeworkController.dispose();
-    _disposeAgora();
+    _webrtcService.endSession();
     super.dispose();
   }
 
@@ -194,9 +191,9 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // AGORA RTC ENGINE INITIALIZATION (PURE NATIVE CAMERA DRIVER)
+  // PURE P2P WEBRTC INITIALIZATION (SUPABASE REALTIME SIGNALING)
   // ---------------------------------------------------------------------------
-  Future<void> _initAgoraAndMedia() async {
+  Future<void> _initWebRtcAndMedia() async {
     // 1. Request hardware camera and microphone permissions
     final permissions = await [Permission.camera, Permission.microphone].request();
     final cameraGranted = permissions[Permission.camera]?.isGranted ?? false;
@@ -208,151 +205,74 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     }
 
     try {
-      // 2. Instantiate Agora RTC Engine with High-Fidelity 48kHz Music Profile
-      _engine = createAgoraRtcEngine();
-      await _engine!.initialize(const RtcEngineContext(
-        appId: AgoraConfig.appId,
-        channelProfile: ChannelProfileType.channelProfileLiveBroadcasting,
-        audioScenario: AudioScenarioType.audioScenarioGameStreaming, // High-Fidelity 48kHz Stereo Music
-      ));
+      // 2. Wire up connection state listeners from KmcWebRtcService
+      _webrtcService.isRemoteConnected.addListener(() {
+        if (!mounted) return;
+        final connected = _webrtcService.isRemoteConnected.value;
+        setState(() {
+          if (connected) {
+            _remoteUid = 2002;
+            _userCount = 2;
+          } else {
+            _remoteUid = null;
+            _userCount = 1;
+          }
+        });
 
-      // 3. Register Full Real-Time Connection & Telemetry Event Handlers
-      _engine!.registerEventHandler(
-        RtcEngineEventHandler(
-          onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint('[KMC Studio] Joined Agora Channel: ${connection.channelId}, localUid: ${connection.localUid}');
-            if (mounted) {
-              setState(() {
-                _isJoined = true;
-                _myUid = connection.localUid ?? 1001;
-              });
-            }
-          },
-          onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-            debugPrint('[KMC Studio] Remote Student Joined: $remoteUid in elapsed ${elapsed}ms');
-            if (mounted) {
-              setState(() {
-                _remoteUid = remoteUid;
-                _userCount = 2;
-              });
-              HapticFeedback.heavyImpact();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Row(
-                    children: [
-                      const Icon(Icons.check_circle_rounded, color: AppTheme.brandGreen, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '🟢 Student Connected: ${widget.session.studentName} is live in studio!',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                      ),
-                    ],
+        if (connected) {
+          HapticFeedback.heavyImpact();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: AppTheme.brandGreen, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '🟢 Student Connected: ${widget.session.studentName} is live in studio!',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
                   ),
-                  backgroundColor: const Color(0xFF0D2818),
-                  behavior: SnackBarBehavior.floating,
-                  duration: const Duration(seconds: 4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: const BorderSide(color: AppTheme.brandGreen, width: 1.5),
-                  ),
-                ),
-              );
-            }
-          },
-          onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
-            debugPrint('[KMC Studio] Remote Student Left: $remoteUid (reason: $reason)');
-            if (mounted) {
-              setState(() {
-                if (_remoteUid == remoteUid) {
-                  _remoteUid = null;
-                  _userCount = 1;
-                }
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Student has disconnected from studio (UID: $remoteUid)'),
-                  backgroundColor: const Color(0xFF2B1D0C),
-                  behavior: SnackBarBehavior.floating,
-                  duration: const Duration(seconds: 3),
-                ),
-              );
-            }
-          },
-          onRtcStats: (RtcConnection connection, RtcStats stats) {
-            if (mounted) {
-              setState(() {
-                _networkPingMs = stats.lastmileDelay ?? _networkPingMs;
-                _userCount = stats.userCount ?? (_remoteUid != null ? 2 : 1);
-                _txBitrate = stats.txKBitRate ?? _txBitrate;
-                _rxBitrate = stats.rxKBitRate ?? _rxBitrate;
-              });
-            }
-          },
-          onRemoteVideoStateChanged: (RtcConnection connection, int remoteUid, RemoteVideoState state, RemoteVideoStateReason reason, int elapsed) {
-            debugPrint('[KMC Studio] Remote video state: $state for UID: $remoteUid');
-            if (mounted) {
-              setState(() {
-                _remoteVideoState = state;
-              });
-            }
-          },
-          onTokenPrivilegeWillExpire: (RtcConnection connection, String token) async {
-            debugPrint('[KMC Studio] Agora token expiring soon. Auto-renewing...');
-            final freshToken = AgoraConfig.generateRtcToken(
-              channelName: connection.channelId ?? widget.session.effectiveChannelName,
-              uid: connection.localUid ?? 0,
-            );
-            if (freshToken.isNotEmpty) {
-              await _engine?.renewToken(freshToken);
-            }
-          },
-          onError: (ErrorCodeType err, String msg) {
-            debugPrint('[KMC Studio] Agora Error: $err, $msg');
-          },
-        ),
-      );
+                ],
+              ),
+              backgroundColor: const Color(0xFF0D2818),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: const BorderSide(color: AppTheme.brandGreen, width: 1.5),
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Student has disconnected from studio: ${widget.session.studentName}'),
+              backgroundColor: const Color(0xFF2B1D0C),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      });
 
-      // 4. Configure native video and audio capture via Agora NDK
-      await _engine!.enableVideo();
-      await _engine!.enableAudio();
-      await _engine!.startPreview();
-
-      // Set Faculty Broadcaster role
-      await _engine!.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
-
-      // 5. Join Canonical Studio Channel with pre-minted Token 2.0
+      // 3. Start WebRTC Host Session with Music-Grade Stereo Constraints
       final channel = widget.session.effectiveChannelName;
-      final token = AgoraConfig.generateRtcToken(channelName: channel, uid: 0);
-
-      await _engine!.joinChannel(
-        token: token,
-        channelId: channel,
-        uid: 0,
-        options: const ChannelMediaOptions(
-          clientRoleType: ClientRoleType.clientRoleBroadcaster,
-          channelProfile: ChannelProfileType.channelProfileLiveBroadcasting,
-          publishCameraTrack: true,
-          publishMicrophoneTrack: true,
-          autoSubscribeAudio: true,
-          autoSubscribeVideo: true,
-        ),
+      await _webrtcService.startSession(
+        sessionId: channel,
+        isHost: true,
       );
-    } catch (e) {
-      debugPrint('[KMC Studio] Initialization error: $e');
-    }
-  }
 
-  Future<void> _disposeAgora() async {
-    try {
-      if (_engine != null) {
-        await _engine!.leaveChannel();
-        await _engine!.release();
-        _engine = null;
+      if (mounted) {
+        setState(() {
+          _isJoined = true;
+          _isAudioMuted = _webrtcService.isAudioMuted;
+          _isVideoMuted = _webrtcService.isVideoMuted;
+          _isFrontCamera = _webrtcService.isFrontCamera;
+        });
       }
     } catch (e) {
-      debugPrint('[KMC Studio] Error releasing Agora engine: $e');
+      debugPrint('[KMC Studio] WebRTC initialization error: $e');
     }
   }
 
@@ -360,10 +280,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   // MEDIA TOGGLES
   // ---------------------------------------------------------------------------
   Future<void> _toggleAudio() async {
-    final nextState = !_isAudioMuted;
-    if (_engine != null) {
-      await _engine!.muteLocalAudioStream(nextState);
-    }
+    final nextState = _webrtcService.toggleMic();
     setState(() {
       _isAudioMuted = nextState;
     });
@@ -371,10 +288,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   }
 
   Future<void> _toggleVideo() async {
-    final nextState = !_isVideoMuted;
-    if (_engine != null) {
-      await _engine!.muteLocalVideoStream(nextState);
-    }
+    final nextState = _webrtcService.toggleVideo();
     setState(() {
       _isVideoMuted = nextState;
     });
@@ -383,15 +297,9 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
 
   Future<void> _switchCamera() async {
     HapticFeedback.mediumImpact();
-    if (_engine != null) {
-      try {
-        await _engine!.switchCamera();
-      } catch (e) {
-        debugPrint('[KMC Studio] Error switching Agora camera: $e');
-      }
-    }
+    final isFront = await _webrtcService.switchCamera();
     setState(() {
-      _isFrontCamera = !_isFrontCamera;
+      _isFrontCamera = isFront;
     });
   }
 
@@ -554,7 +462,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     if (shouldLeave == true && mounted) {
       await _saveLessonNotes();
       await _broadcastLiveEnd();
-      await _disposeAgora();
+      await _webrtcService.endSession();
       if (mounted) {
         Navigator.of(context).pop();
       }
@@ -849,24 +757,20 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   Widget _buildMainVideoStage() {
     Widget stageContent;
 
-    // 1. If Agora is active and a remote student has connected
-    if (_isJoined && _engine != null && _remoteUid != null) {
+    // 1. If WebRTC is active and a remote student has connected
+    if (_isJoined && _remoteUid != null) {
       stageContent = ClipRRect(
-        child: AgoraVideoView(
-          controller: VideoViewController.remote(
-            rtcEngine: _engine!,
-            canvas: VideoCanvas(uid: _remoteUid),
-            connection: RtcConnection(channelId: widget.session.effectiveChannelName),
-          ),
+        child: RTCVideoView(
+          _webrtcService.remoteRenderer,
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
         ),
       );
-    } else if (_isLocalExpanded && !_isVideoMuted && _isJoined && _engine != null) {
+    } else if (_isLocalExpanded && !_isVideoMuted && _isJoined) {
       // 2. Teacher expanded local camera to full main stage
-      stageContent = AgoraVideoView(
-        controller: VideoViewController(
-          rtcEngine: _engine!,
-          canvas: const VideoCanvas(uid: 0),
-        ),
+      stageContent = RTCVideoView(
+        _webrtcService.localRenderer,
+        mirror: _isFrontCamera,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     } else {
       // 3. Waiting Stage: Faculty Live in Studio, waiting for Student
@@ -1014,13 +918,12 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
           ),
         ),
       );
-    } else if (_isJoined && _engine != null) {
-      // Agora live local stream preview via native NDK
-      videoWidget = AgoraVideoView(
-        controller: VideoViewController(
-          rtcEngine: _engine!,
-          canvas: const VideoCanvas(uid: 0),
-        ),
+    } else if (_isJoined) {
+      // WebRTC live local stream preview
+      videoWidget = RTCVideoView(
+        _webrtcService.localRenderer,
+        mirror: _isFrontCamera,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     } else {
       // Camera initializing spinner
@@ -1188,7 +1091,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                           ),
                         ),
                         Text(
-                          'Real-Time Agora RTC 6.6.4 Telemetry & Metrics',
+                          'Pure P2P WebRTC Telemetry & Supabase Signaling',
                           style: TextStyle(
                             color: AppTheme.textMuted,
                             fontSize: 12,
@@ -1252,9 +1155,9 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                 Icons.person_rounded,
               ),
               _buildTelemetryRow(
-                'Network Latency (RTT)',
-                _networkPingMs > 0 ? '$_networkPingMs ms' : 'Active (Direct Low-Latency)',
-                Icons.network_check_rounded,
+                'Signaling Engine',
+                'Supabase Realtime Broadcast (Zero-Cost)',
+                Icons.hub_rounded,
               ),
               _buildTelemetryRow(
                 'Channel Population',
@@ -1274,9 +1177,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               _buildTelemetryRow(
                 'Student Video Feed',
                 _remoteUid != null
-                    ? (_remoteVideoState == RemoteVideoState.remoteVideoStateDecoding
-                        ? 'Decoding & Rendering HD'
-                        : 'Active / Subscribed')
+                    ? 'P2P Media Track Decoded (Active)'
                     : 'Awaiting Student Stream',
                 Icons.videocam_rounded,
               ),
@@ -1287,7 +1188,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
               ),
               _buildTelemetryRow(
                 'Security & Encryption',
-                'Agora Token 2.0 (Automatic & Verified)',
+                'P2P DTLS-SRTP (Unmetered / Direct)',
                 Icons.lock_outline_rounded,
               ),
               const SizedBox(height: 18),
