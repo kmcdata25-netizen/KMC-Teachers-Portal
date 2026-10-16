@@ -33,11 +33,14 @@ class KmcWebRtcService {
   bool _isFrontCamera = true;
   bool _isInitialized = false;
   bool _isRemoteDescriptionSet = false;
+  bool _isProctorRemoteDescriptionSet = false;
 
   RTCSessionDescription? _myOffer;
   RTCSessionDescription? _myAnswer;
   final List<RTCIceCandidate> _myIceCandidates = [];
   final List<RTCIceCandidate> _pendingIceCandidates = [];
+  final List<RTCIceCandidate> _pendingProctorCandidates = [];
+  final List<RTCIceCandidate> _myProctorCandidates = [];
   Timer? _presenceTimer;
 
   bool get isAudioMuted => _isAudioMuted;
@@ -332,18 +335,27 @@ class KmcWebRtcService {
       } else if (signalType == 'proctor-answer') {
         final target = payload['target'] as String?;
         final myRole = isInstructor ? 'teacher' : 'student';
-        if (target == myRole || target == null) {
+        if (target == myRole || target == null || target == 'all') {
           final sdp = payload['sdp'] as String?;
           if (sdp != null) {
             final description = RTCSessionDescription(sdp, 'answer');
             await _proctorPeerConnection?.setRemoteDescription(description);
-            debugPrint('[KmcWebRtc] Proctor answer set successfully for $myRole.');
+            _isProctorRemoteDescriptionSet = true;
+            for (final candidate in _pendingProctorCandidates) {
+              try {
+                await _proctorPeerConnection?.addCandidate(candidate);
+              } catch (e) {
+                debugPrint('[KmcWebRtc] Error adding pending proctor candidate: $e');
+              }
+            }
+            _pendingProctorCandidates.clear();
+            debugPrint('[KmcWebRtc] Proctor answer set successfully for $myRole. Active proctor connection established.');
           }
         }
       } else if (signalType == 'proctor-candidate') {
         final target = payload['target'] as String?;
         final myRole = isInstructor ? 'teacher' : 'student';
-        if (target == myRole || target == null) {
+        if (target == myRole || target == null || target == 'all') {
           final candidateMap = payload['candidate'] as Map<String, dynamic>?;
           if (candidateMap != null) {
             final candidate = RTCIceCandidate(
@@ -351,13 +363,24 @@ class KmcWebRtcService {
               candidateMap['sdpMid'],
               candidateMap['sdpMLineIndex'],
             );
-            await _proctorPeerConnection?.addCandidate(candidate);
+            if (_isProctorRemoteDescriptionSet) {
+              try {
+                await _proctorPeerConnection?.addCandidate(candidate);
+              } catch (e) {
+                debugPrint('[KmcWebRtc] Add proctor candidate error: $e');
+              }
+            } else {
+              _pendingProctorCandidates.add(candidate);
+            }
           }
         }
       } else if (signalType == 'proctor-leave') {
         debugPrint('[KmcWebRtc] Proctor left observation.');
         await _proctorPeerConnection?.close();
         _proctorPeerConnection = null;
+        _isProctorRemoteDescriptionSet = false;
+        _pendingProctorCandidates.clear();
+        _myProctorCandidates.clear();
       }
     });
 
@@ -525,6 +548,10 @@ class KmcWebRtcService {
   Future<void> _handleProctorJoin() async {
     if (_localStream == null) return;
     try {
+      _isProctorRemoteDescriptionSet = false;
+      _pendingProctorCandidates.clear();
+      _myProctorCandidates.clear();
+
       await _proctorPeerConnection?.close();
       _proctorPeerConnection = await createPeerConnection(rtcConfiguration);
 
@@ -532,14 +559,21 @@ class KmcWebRtcService {
         await _proctorPeerConnection!.addTrack(track, _localStream!);
       }
 
+      // Audio track from Director when intervening (speaking into studio)
+      _proctorPeerConnection!.onTrack = (RTCTrackEvent event) {
+        debugPrint('[KmcWebRtc] Director proctor audio track received: ${event.track.kind}');
+      };
+
       _proctorPeerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
         if (candidate.candidate == null) return;
+        _myProctorCandidates.add(candidate);
         _signalingChannel?.sendBroadcastMessage(
           event: 'signal',
           payload: {
             'signalType': 'proctor-candidate',
             'msgType': 'proctor-candidate',
             'sender': isInstructor ? 'teacher' : 'student',
+            'target': 'director',
             'candidate': {
               'candidate': candidate.candidate,
               'sdpMid': candidate.sdpMid,
@@ -558,12 +592,13 @@ class KmcWebRtcService {
       offer = RTCSessionDescription(optimizedSdp, offer.type);
       await _proctorPeerConnection!.setLocalDescription(offer);
 
-      _signalingChannel?.sendBroadcastMessage(
+      await _signalingChannel?.sendBroadcastMessage(
         event: 'signal',
         payload: {
           'signalType': 'proctor-offer',
           'msgType': 'proctor-offer',
           'sender': isInstructor ? 'teacher' : 'student',
+          'target': 'director',
           'sdp': offer.sdp,
         },
       );
@@ -591,6 +626,9 @@ class KmcWebRtcService {
       await _proctorPeerConnection?.close();
       await _proctorPeerConnection?.dispose();
       _proctorPeerConnection = null;
+      _isProctorRemoteDescriptionSet = false;
+      _pendingProctorCandidates.clear();
+      _myProctorCandidates.clear();
 
       await _peerConnection?.close();
       await _peerConnection?.dispose();

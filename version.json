@@ -1,9 +1,9 @@
 {
   "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.11",
-  "latest_build_number": 15,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.11/KMC_Teacher_Portal_v1.0.11_b15.apk",
-  "release_notes": "v1.0.11+15 - Fix WebRTC Studio Signaling & Auto-Handshake Connection\n- Resolved Supabase Realtime broadcast payload type collision (signalType isolation)\n- Added automated signaling presence heartbeat and candidate batch synchronization\n- Seamless instantaneous audio/video connection between teacher and student studios\n- Native acoustic music audio profile (Opus Stereo 48kHz, disabled ANC/AGC for natural instrument resonance)",
+  "latest_version": "1.0.12",
+  "latest_build_number": 16,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.12/KMC_Teacher_Portal_v1.0.12_b16.apk",
+  "release_notes": "v1.0.12+16 - Rock-Solid WebRTC Director Proctor Observation & Audio Intervene\n- Integrated Director talkback audio stream listener on faculty studio\n- Robust ICE candidate buffering and presence synchronization for stealth QA observation\n- Zero-renegotiation Director microphone intervention support\n- Preserved acoustic music audio profile (Opus Stereo 48kHz, disabled ANC/AGC)",
   "force_update": false
 }
