@@ -349,6 +349,7 @@ class KmcWebRtcService {
               }
             }
             _pendingProctorCandidates.clear();
+            _sendAllGatheredProctorCandidates();
             debugPrint('[KmcWebRtc] Proctor answer set successfully for $myRole. Active proctor connection established.');
           }
         }
@@ -562,6 +563,10 @@ class KmcWebRtcService {
       // Audio track from Director when intervening (speaking into studio)
       _proctorPeerConnection!.onTrack = (RTCTrackEvent event) {
         debugPrint('[KmcWebRtc] Director proctor audio track received: ${event.track.kind}');
+        if (event.track.kind == 'audio') {
+          event.track.enabled = true;
+          Helper.setSpeakerphoneOn(true);
+        }
       };
 
       _proctorPeerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
@@ -605,6 +610,26 @@ class KmcWebRtcService {
       debugPrint('[KmcWebRtc] Proctor offer dispatched from ${isInstructor ? "teacher" : "student"}.');
     } catch (e) {
       debugPrint('[KmcWebRtc] Error handling proctor join: $e');
+    }
+  }
+
+  void _sendAllGatheredProctorCandidates() {
+    if (_myProctorCandidates.isEmpty || _signalingChannel == null) return;
+    for (final candidate in _myProctorCandidates) {
+      _signalingChannel?.sendBroadcastMessage(
+        event: 'signal',
+        payload: {
+          'signalType': 'proctor-candidate',
+          'msgType': 'proctor-candidate',
+          'sender': isInstructor ? 'teacher' : 'student',
+          'target': 'director',
+          'candidate': {
+            'candidate': candidate.candidate,
+            'sdpMid': candidate.sdpMid,
+            'sdpMLineIndex': candidate.sdpMLineIndex,
+          },
+        },
+      );
     }
   }
 
