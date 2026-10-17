@@ -148,10 +148,9 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(20.0),
-                    child: TeacherEmptyState(
+                    child: TeacherEmptyState.offline(
                       title: 'Faculty Profile Unavailable',
                       message: 'Data not available. Please connect to the internet.',
-                      icon: Icons.wifi_off_rounded,
                       onRetry: _loadLiveProfile,
                       isRetrying: _isLoading,
                     ),

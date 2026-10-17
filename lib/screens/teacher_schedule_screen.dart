@@ -18,6 +18,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
   String _selectedStudioFilter = 'All Studios';
   List<TeacherClass> _classList = [];
   bool _isLoading = true;
+  bool _hasError = false;
   late List<DateTime> _weekDays;
   TeacherProfile? _teacher;
 
@@ -47,7 +48,10 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
 
   Future<void> _fetchScheduleForDate(DateTime date) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
 
     try {
       final schedule = await TeacherSupabaseService.instance.fetchTeacherSchedule(_teacher!, date);
@@ -55,6 +59,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
         setState(() {
           _classList = schedule;
           _isLoading = false;
+          _hasError = false;
         });
       }
     } catch (e) {
@@ -62,6 +67,7 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
         setState(() {
           _classList = [];
           _isLoading = false;
+          _hasError = true;
         });
       }
     }
@@ -252,12 +258,20 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
-                          child: TeacherEmptyState(
-                            title: 'No Classes Scheduled',
-                            message: 'Data not available. Please connect to the internet to check or book sessions.',
-                            onRetry: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
-                            isRetrying: _isLoading,
-                          ),
+                          child: _hasError
+                              ? TeacherEmptyState.offline(
+                                  title: 'Timetable Offline',
+                                  message: 'Data not available. Please connect to the internet to check or book sessions.',
+                                  onRetry: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
+                                  isRetrying: _isLoading,
+                                )
+                              : TeacherEmptyState.empty(
+                                  title: 'No Classes Scheduled',
+                                  message: 'No masterclasses scheduled for this date. Tap "Book Studio" to add one.',
+                                  icon: Icons.calendar_today_outlined,
+                                  onRefresh: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
+                                  isRefreshing: _isLoading,
+                                ),
                         ),
                       )
                     : ListView.separated(

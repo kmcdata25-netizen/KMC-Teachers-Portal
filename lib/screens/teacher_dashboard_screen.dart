@@ -30,6 +30,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   };
   List<TeacherClass> classes = [];
   bool _isLoading = true;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -38,22 +39,35 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 
   Future<void> _loadLiveDashboard() async {
-    setState(() => _isLoading = true);
-    TeacherProfile? teacher = TeacherSupabaseService.instance.activeTeacher;
-    teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
-    teacher ??= MockTeacherData.currentTeacher;
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
+    try {
+      TeacherProfile? teacher = TeacherSupabaseService.instance.activeTeacher;
+      teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
+      teacher ??= MockTeacherData.currentTeacher;
 
-    final statsFuture = TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
-    final scheduleFuture = TeacherSupabaseService.instance.fetchTeacherSchedule(teacher, DateTime.now());
-    final results = await Future.wait([statsFuture, scheduleFuture]);
+      final statsFuture = TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
+      final scheduleFuture = TeacherSupabaseService.instance.fetchTeacherSchedule(teacher, DateTime.now());
+      final results = await Future.wait([statsFuture, scheduleFuture]);
 
-    if (mounted) {
-      setState(() {
-        profile = teacher!;
-        _stats = results[0] as Map<String, dynamic>;
-        classes = results[1] as List<TeacherClass>;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          profile = teacher!;
+          _stats = results[0] as Map<String, dynamic>;
+          classes = results[1] as List<TeacherClass>;
+          _isLoading = false;
+          _hasError = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
     }
   }
 
@@ -185,13 +199,20 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
 
                 // Classes List for Today
                 if (classes.isEmpty)
-                  TeacherEmptyState(
-                    title: 'No Classes Scheduled',
-                    message: 'Data not available. Please connect to the internet.',
-                    icon: Icons.wifi_off_rounded,
-                    onRetry: _loadLiveDashboard,
-                    isRetrying: _isLoading,
-                  )
+                  _hasError
+                      ? TeacherEmptyState.offline(
+                          title: 'Timetable Offline',
+                          message: 'Data not available. Please connect to the internet.',
+                          onRetry: _loadLiveDashboard,
+                          isRetrying: _isLoading,
+                        )
+                      : TeacherEmptyState.empty(
+                          title: 'No Classes Today',
+                          message: 'You have no scheduled masterclasses on your timetable today.',
+                          icon: Icons.event_busy_rounded,
+                          onRefresh: _loadLiveDashboard,
+                          isRefreshing: _isLoading,
+                        )
                 else
                   ListView.separated(
                     shrinkWrap: true,
@@ -1060,11 +1081,11 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   const SizedBox(height: 16),
                   Expanded(
                     child: materials.isEmpty
-                        ? const Center(
-                            child: TeacherEmptyState(
-                              title: 'Resource Library Unavailable',
-                              message: 'Data not available. Please connect to the internet.',
-                              icon: Icons.wifi_off_rounded,
+                        ? Center(
+                            child: TeacherEmptyState.empty(
+                              title: 'Resource Library Empty',
+                              message: 'There are currently no instructional materials or stems in the library.',
+                              icon: Icons.library_music_outlined,
                             ),
                           )
                         : ListView.separated(

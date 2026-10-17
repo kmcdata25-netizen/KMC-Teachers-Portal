@@ -17,6 +17,7 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
   String _selectedFilter = 'All';
   List<StudentRosterItem> _allStudents = [];
   bool _isLoading = true;
+  bool _hasError = false;
   TeacherProfile? _teacher;
 
   @override
@@ -26,7 +27,10 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
   }
 
   Future<void> _loadLiveStudents() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
     _teacher = TeacherSupabaseService.instance.activeTeacher;
     _teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
     _teacher ??= MockTeacherData.currentTeacher;
@@ -37,6 +41,7 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
         setState(() {
           _allStudents = list;
           _isLoading = false;
+          _hasError = false;
         });
       }
     } catch (e) {
@@ -44,6 +49,7 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
         setState(() {
           _allStudents = [];
           _isLoading = false;
+          _hasError = true;
         });
       }
     }
@@ -528,14 +534,22 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
                       ? Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24),
-                            child: TeacherEmptyState(
-                              title: _searchController.text.isNotEmpty ? 'No Matching Students' : 'Student Roster Not Available',
-                              message: _searchController.text.isNotEmpty
-                                  ? 'No learners matched "${_searchController.text}".'
-                                  : 'Data not available. Please connect to the internet.',
-                              onRetry: _loadLiveStudents,
-                              isRetrying: _isLoading,
-                            ),
+                            child: _hasError
+                                ? TeacherEmptyState.offline(
+                                    title: 'Student Roster Offline',
+                                    message: 'Data not available. Please connect to the internet.',
+                                    onRetry: _loadLiveStudents,
+                                    isRetrying: _isLoading,
+                                  )
+                                : TeacherEmptyState.empty(
+                                    title: _searchController.text.isNotEmpty ? 'No Matching Students' : 'No Students Enrolled',
+                                    message: _searchController.text.isNotEmpty
+                                        ? 'No learners matched "${_searchController.text}".'
+                                        : 'No students are currently enrolled in your studio classes.',
+                                    icon: Icons.people_outline_rounded,
+                                    onRefresh: _loadLiveStudents,
+                                    isRefreshing: _isLoading,
+                                  ),
                           ),
                         )
                       : ListView.separated(

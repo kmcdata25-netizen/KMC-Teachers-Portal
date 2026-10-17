@@ -18,6 +18,7 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
   late TabController _tabController;
   List<StudentSubmission> _submissions = [];
   bool _isLoading = true;
+  bool _hasError = false;
   TeacherProfile? _teacher;
 
   @override
@@ -34,7 +35,10 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
   }
 
   Future<void> _loadSubmissions() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
     _teacher = TeacherSupabaseService.instance.activeTeacher;
     _teacher ??= await TeacherSupabaseService.instance.checkSavedSession();
     _teacher ??= MockTeacherData.currentTeacher;
@@ -45,6 +49,7 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
         setState(() {
           _submissions = list;
           _isLoading = false;
+          _hasError = false;
         });
       }
     } catch (e) {
@@ -52,6 +57,7 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
         setState(() {
           _submissions = [];
           _isLoading = false;
+          _hasError = true;
         });
       }
     }
@@ -335,12 +341,12 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
   }
 
   Widget _buildSubmissionList(List<StudentSubmission> list, {required bool isPending}) {
-    if (_submissions.isEmpty) {
+    if (_hasError) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: TeacherEmptyState(
-            title: 'Submissions Not Available',
+          child: TeacherEmptyState.offline(
+            title: 'Submissions Offline',
             message: 'Data not available. Please connect to the internet to load student drills.',
             onRetry: _loadSubmissions,
             isRetrying: _isLoading,
@@ -351,25 +357,17 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
 
     if (list.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isPending ? Icons.check_circle_outline_rounded : Icons.history_rounded,
-              size: 48,
-              color: AppTheme.textMuted.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              isPending ? 'All caught up! No pending submissions.' : 'No reviewed drills yet.',
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 14),
-            ),
-            const SizedBox(height: 6),
-            TextButton(
-              onPressed: _loadSubmissions,
-              child: const Text('Refresh from Central Mind', style: TextStyle(color: AppTheme.brandGreen)),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: TeacherEmptyState.empty(
+            title: isPending ? 'All Caught Up!' : 'No Reviewed Drills',
+            message: isPending
+                ? 'There are currently no student practice submissions awaiting evaluation.'
+                : 'No reviewed practice drills found in database history.',
+            icon: isPending ? Icons.check_circle_outline_rounded : Icons.history_rounded,
+            onRefresh: _loadSubmissions,
+            isRefreshing: _isLoading,
+          ),
         ),
       );
     }

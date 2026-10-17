@@ -2,26 +2,76 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 /// Standard, professional offline / empty state display for Kasarani Music Center Teacher Portal.
-/// Guarantees 100% database reliance: informs faculty clearly when schedule, submissions,
-/// or student data are unavailable and provides an immediate action to reconnect/retry against Supabase Central Mind.
+/// Accurately differentiates between:
+/// 1. True offline/network errors: "Data not available. Please connect to the internet."
+/// 2. Empty database records: "No records found in database."
 class TeacherEmptyState extends StatelessWidget {
   final String title;
   final String message;
   final IconData icon;
-  final VoidCallback? onRetry;
-  final bool isRetrying;
+  final Color? iconColor;
+  final Color? iconBgColor;
+  final VoidCallback? onAction;
+  final String actionLabel;
+  final bool isActionLoading;
 
   const TeacherEmptyState({
     super.key,
     this.title = 'Data Not Available',
     this.message = 'Data not available. Please connect to the internet.',
     this.icon = Icons.wifi_off_rounded,
-    this.onRetry,
-    this.isRetrying = false,
+    this.iconColor,
+    this.iconBgColor,
+    this.onAction,
+    this.actionLabel = 'Retry Connection',
+    this.isActionLoading = false,
   });
+
+  /// Factory for when network or connection to Supabase fails
+  factory TeacherEmptyState.offline({
+    String title = 'Connection Error',
+    String message = 'Data not available. Please connect to the internet.',
+    VoidCallback? onRetry,
+    bool isRetrying = false,
+  }) {
+    return TeacherEmptyState(
+      title: title,
+      message: message,
+      icon: Icons.wifi_off_rounded,
+      iconColor: AppTheme.accentCoral,
+      iconBgColor: AppTheme.accentCoral.withValues(alpha: 0.12),
+      onAction: onRetry,
+      actionLabel: 'Retry Connection',
+      isActionLoading: isRetrying,
+    );
+  }
+
+  /// Factory for when connected successfully to Supabase, but the database table has 0 rows
+  factory TeacherEmptyState.empty({
+    required String title,
+    required String message,
+    IconData icon = Icons.inbox_outlined,
+    VoidCallback? onRefresh,
+    bool isRefreshing = false,
+    String actionLabel = 'Refresh',
+  }) {
+    return TeacherEmptyState(
+      title: title,
+      message: message,
+      icon: icon,
+      iconColor: AppTheme.brandGold,
+      iconBgColor: AppTheme.brandGold.withValues(alpha: 0.12),
+      onAction: onRefresh,
+      actionLabel: actionLabel,
+      isActionLoading: isRefreshing,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final effectiveIconColor = iconColor ?? AppTheme.accentCoral;
+    final effectiveIconBgColor = iconBgColor ?? effectiveIconColor.withValues(alpha: 0.12);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
@@ -38,10 +88,10 @@ class TeacherEmptyState extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppTheme.accentCoral.withValues(alpha: 0.12),
+              color: effectiveIconBgColor,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, size: 36, color: AppTheme.accentCoral),
+            child: Icon(icon, size: 36, color: effectiveIconColor),
           ),
           const SizedBox(height: 16),
           Text(
@@ -67,11 +117,11 @@ class TeacherEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           ),
-          if (onRetry != null) ...[
+          if (onAction != null) ...[
             const SizedBox(height: 18),
             ElevatedButton.icon(
-              onPressed: isRetrying ? null : onRetry,
-              icon: isRetrying
+              onPressed: isActionLoading ? null : onAction,
+              icon: isActionLoading
                   ? const SizedBox(
                       width: 14,
                       height: 14,
@@ -82,17 +132,17 @@ class TeacherEmptyState extends StatelessWidget {
                     )
                   : const Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
               label: Text(
-                isRetrying ? 'Connecting...' : 'Retry Connection',
+                isActionLoading ? 'Loading...' : actionLabel,
                 style: const TextStyle(
                   color: Colors.black,
                   fontWeight: FontWeight.w700,
-                  fontSize: 13,
+                  fontSize: 12.5,
                 ),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.brandGreen,
+                backgroundColor: AppTheme.neonGreen,
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
               ),
             ),
