@@ -4,6 +4,7 @@ import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/practice_drill_media_player.dart';
 import '../widgets/student_communication_sheet.dart';
+import '../widgets/teacher_empty_state.dart';
 
 class TeacherSubmissionsScreen extends StatefulWidget {
   const TeacherSubmissionsScreen({super.key});
@@ -49,7 +50,7 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
     } catch (e) {
       if (mounted) {
         setState(() {
-          _submissions = MockTeacherData.submissions;
+          _submissions = [];
           _isLoading = false;
         });
       }
@@ -334,6 +335,20 @@ class _TeacherSubmissionsScreenState extends State<TeacherSubmissionsScreen>
   }
 
   Widget _buildSubmissionList(List<StudentSubmission> list, {required bool isPending}) {
+    if (_submissions.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: TeacherEmptyState(
+            title: 'Submissions Not Available',
+            message: 'Data not available. Please connect to the internet to load student drills.',
+            onRetry: _loadSubmissions,
+            isRetrying: _isLoading,
+          ),
+        ),
+      );
+    }
+
     if (list.isEmpty) {
       return Center(
         child: Column(

@@ -5,6 +5,7 @@ import '../services/teacher_supabase_service.dart';
 import '../services/teacher_update_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/teacher_update_dialog.dart';
+import '../widgets/teacher_empty_state.dart';
 import 'kmc_live_studio_screen.dart';
 import 'teacher_login_screen.dart';
 
@@ -143,7 +144,20 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.brandGreen))
-          : RefreshIndicator(
+          : _profile.id.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: TeacherEmptyState(
+                      title: 'Faculty Profile Unavailable',
+                      message: 'Data not available. Please connect to the internet.',
+                      icon: Icons.wifi_off_rounded,
+                      onRetry: _loadLiveProfile,
+                      isRetrying: _isLoading,
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
               onRefresh: _loadLiveProfile,
               color: AppTheme.brandGreen,
               child: SingleChildScrollView(

@@ -3,6 +3,7 @@ import '../data/mock_teacher_data.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/student_communication_sheet.dart';
+import '../widgets/teacher_empty_state.dart';
 
 class TeacherStudentsScreen extends StatefulWidget {
   const TeacherStudentsScreen({super.key});
@@ -525,21 +526,16 @@ class _TeacherStudentsScreenState extends State<TeacherStudentsScreen> {
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.brandGreen))
                   : filteredStudents.isEmpty
                       ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.people_outline_rounded, size: 48, color: AppTheme.textMuted),
-                              const SizedBox(height: 12),
-                              const Text(
-                                'No enrolled students found.',
-                                style: TextStyle(color: AppTheme.textMuted, fontSize: 14),
-                              ),
-                              const SizedBox(height: 6),
-                              TextButton(
-                                onPressed: _loadLiveStudents,
-                                child: const Text('Refresh from Central Mind', style: TextStyle(color: AppTheme.brandGreen)),
-                              ),
-                            ],
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: TeacherEmptyState(
+                              title: _searchController.text.isNotEmpty ? 'No Matching Students' : 'Student Roster Not Available',
+                              message: _searchController.text.isNotEmpty
+                                  ? 'No learners matched "${_searchController.text}".'
+                                  : 'Data not available. Please connect to the internet.',
+                              onRetry: _loadLiveStudents,
+                              isRetrying: _isLoading,
+                            ),
                           ),
                         )
                       : ListView.separated(

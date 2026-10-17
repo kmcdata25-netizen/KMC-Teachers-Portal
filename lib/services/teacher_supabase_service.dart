@@ -261,7 +261,7 @@ class TeacherSupabaseService {
   /// Fetch all registered faculty members from Central Mind
   Future<List<TeacherProfile>> fetchAllFaculty() async {
     final client = _client;
-    if (client == null) return [MockTeacherData.currentTeacher];
+    if (client == null) return [];
 
     try {
       final res = await client
@@ -281,7 +281,7 @@ class TeacherSupabaseService {
     } catch (e) {
       debugPrint('[TeacherApp] Fetch all faculty notice: $e');
     }
-    return [MockTeacherData.currentTeacher];
+    return [];
   }
 
   TeacherProfile _mapToTeacherProfile(Map<String, dynamic> prof, Map<String, dynamic>? teacher) {
@@ -434,7 +434,7 @@ class TeacherSupabaseService {
   /// Fetch studio schedule for the selected day from live_sessions table
   Future<List<TeacherClass>> fetchTeacherSchedule(TeacherProfile teacher, DateTime date) async {
     final client = _client;
-    if (client == null) return MockTeacherData.todaySchedule;
+    if (client == null) return [];
 
     try {
       final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -800,7 +800,7 @@ class TeacherSupabaseService {
   /// Fetch student drill submissions from student_checklist_progress
   Future<List<StudentSubmission>> fetchStudentSubmissions(TeacherProfile teacher) async {
     final client = _client;
-    if (client == null) return MockTeacherData.submissions;
+    if (client == null) return [];
 
     try {
       final res = await client
@@ -847,7 +847,7 @@ class TeacherSupabaseService {
       debugPrint('[TeacherApp] Fetch drill submissions notice: $e');
     }
 
-    return MockTeacherData.submissions;
+    return [];
   }
 
   /// Submit drill review with rating and comments to Central Mind

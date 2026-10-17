@@ -3,6 +3,7 @@ import '../data/mock_teacher_data.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/student_communication_sheet.dart';
+import '../widgets/teacher_empty_state.dart';
 import 'kmc_live_studio_screen.dart';
 
 class TeacherScheduleScreen extends StatefulWidget {
@@ -249,21 +250,14 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                   )
                 : filteredClasses.isEmpty
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.event_note_rounded, size: 48, color: AppTheme.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No sessions scheduled for ${_getDayName(_weekDays[_selectedDayIndex].weekday)}, ${_weekDays[_selectedDayIndex].day}/${_weekDays[_selectedDayIndex].month}.',
-                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 14),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Studio rooms are open for faculty practice.',
-                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                            ),
-                          ],
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: TeacherEmptyState(
+                            title: 'No Classes Scheduled',
+                            message: 'Data not available. Please connect to the internet to check or book sessions.',
+                            onRetry: () => _fetchScheduleForDate(_weekDays[_selectedDayIndex]),
+                            isRetrying: _isLoading,
+                          ),
                         ),
                       )
                     : ListView.separated(

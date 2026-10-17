@@ -4,6 +4,7 @@ import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/student_communication_sheet.dart';
+import '../widgets/teacher_empty_state.dart';
 import 'kmc_live_studio_screen.dart';
 import 'teacher_notifications_screen.dart';
 
@@ -184,20 +185,12 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
 
                 // Classes List for Today
                 if (classes.isEmpty)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceCard,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.borderOutline),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'No studio sessions scheduled for today.\nRooms are open for faculty practice.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-                    ),
+                  TeacherEmptyState(
+                    title: 'No Classes Scheduled',
+                    message: 'Data not available. Please connect to the internet.',
+                    icon: Icons.wifi_off_rounded,
+                    onRetry: _loadLiveDashboard,
+                    isRetrying: _isLoading,
                   )
                 else
                   ListView.separated(
@@ -994,43 +987,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 
   void _showFacultyMaterialsSheet(BuildContext context) {
-    final materials = [
-      {
-        'title': 'KMC Piano Department — Rootless Shell Voicings Guide',
-        'category': 'Sheet Music',
-        'type': 'PDF',
-        'size': '2.4 MB',
-        'desc': 'Autumn Leaves & Fly Me to the Moon ii-V-I guide sheets with fingering notation.',
-      },
-      {
-        'title': 'Hanon The Virtuoso Pianist (Part 1 Exercises 1-20)',
-        'category': 'Sheet Music',
-        'type': 'PDF',
-        'size': '4.1 MB',
-        'desc': 'Curated exercises for finger independence, agility, and wrist relaxation.',
-      },
-      {
-        'title': 'KMC Faculty Practical Grading Rubric (2026 Edition)',
-        'category': 'Curricula',
-        'type': 'DOC',
-        'size': '850 KB',
-        'desc': 'Official grading criteria for Rhythm (40%), Technique (35%), Phrasing (25%).',
-      },
-      {
-        'title': 'Jazz Swing Backing Loop — Medium Tempo (85 BPM)',
-        'category': 'Backing Loops',
-        'type': 'MP3',
-        'size': '6.8 MB',
-        'desc': 'Upright acoustic bass and brush snare loop for student modal improvisation.',
-      },
-      {
-        'title': 'Bossa Nova Rhythm Master Stem (110 BPM)',
-        'category': 'Backing Loops',
-        'type': 'MP3',
-        'size': '5.2 MB',
-        'desc': 'Authentic cross-stick and acoustic guitar accompaniment track for rehearsal.',
-      },
-    ];
+    final List<Map<String, String>> materials = [];
 
     showModalBottomSheet(
       context: context,
@@ -1102,7 +1059,15 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   ),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: ListView.separated(
+                    child: materials.isEmpty
+                        ? const Center(
+                            child: TeacherEmptyState(
+                              title: 'Resource Library Unavailable',
+                              message: 'Data not available. Please connect to the internet.',
+                              icon: Icons.wifi_off_rounded,
+                            ),
+                          )
+                        : ListView.separated(
                       controller: scrollController,
                       itemCount: materials.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
