@@ -31,11 +31,13 @@ class TeacherProfile {
     required this.studio,
     required this.status,
     required this.avatarInitials,
-    this.hourlyRate = 1500.0,
-    this.rating = 5.0,
-    this.instruments = const ['Contemporary Jazz Piano', 'Keyboards'],
-    this.availableDays = const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    this.hourlyRate = 0.0,
+    this.rating = 0.0,
+    this.instruments = const [],
+    this.availableDays = const [],
   });
+
+  String get assignedStudio => studio;
 }
 
 class TeacherMetric {
@@ -202,15 +204,15 @@ class MockTeacherData {
   static const TeacherProfile currentTeacher = TeacherProfile(
     id: '',
     teacherTableId: '',
-    name: 'Faculty Member',
-    title: 'Instructor',
+    name: '',
+    title: '',
     facultyId: '',
-    department: 'Music Studies',
+    department: '',
     email: '',
     phone: '',
-    studio: 'Studio Lab',
+    studio: '',
     status: '⚪ Offline',
-    avatarInitials: 'KM',
+    avatarInitials: '',
   );
 
   static const List<TeacherMetric> metrics = [];

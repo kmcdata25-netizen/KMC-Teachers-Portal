@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/kmc_webrtc_service.dart';
 import '../services/teacher_supabase_service.dart';
@@ -67,36 +68,8 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
   bool _isPlayingPitch = false;
 
   // Sheet Music / Repertoire State
-  final List<Map<String, String>> _sampleScores = [
-    {
-      'title': 'J.S. Bach – Prelude in C Major, BWV 846',
-      'key': 'C Major',
-      'tempo': 'Moderato (80 BPM)',
-      'instrument': 'Piano',
-      'status': 'Current Repertoire Assignment',
-    },
-    {
-      'title': 'H. Schradieck – School of Violin Technics, No. 1',
-      'key': 'G Major',
-      'tempo': 'Allegro (108 BPM)',
-      'instrument': 'Violin',
-      'status': 'Technique Drill',
-    },
-    {
-      'title': 'M. Carcassi – 25 Melodic Studies, Op. 60 No. 7',
-      'key': 'A Minor',
-      'tempo': 'Andante (72 BPM)',
-      'instrument': 'Classical Guitar',
-      'status': 'Etude Drill',
-    },
-    {
-      'title': 'Vocalises Vaccai – Lesson I: The Scale & Intervals',
-      'key': 'D Major',
-      'tempo': 'Largo (60 BPM)',
-      'instrument': 'Voice / Vocal Coaching',
-      'status': 'Warm-Up',
-    },
-  ];
+  List<Map<String, dynamic>> _liveScores = [];
+  bool _isLoadingScores = true;
   int _activeScoreIndex = 0;
 
   // Live Notes & Homework Logger
@@ -114,7 +87,28 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
     _notesController.text = widget.session.notes;
     _startSessionTimer();
     _initWebRtcAndMedia();
+    _loadLiveScores();
     _liveStartFuture = _broadcastLiveStart();
+  }
+
+  Future<void> _loadLiveScores() async {
+    try {
+      final scores = await TeacherSupabaseService.instance.fetchCurriculumSheetMusic(
+        courseName: widget.session.courseName,
+      );
+      if (mounted) {
+        setState(() {
+          _liveScores = scores;
+          _isLoadingScores = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingScores = false;
+        });
+      }
+    }
   }
 
   Future<void> _broadcastLiveStart() async {
@@ -1802,19 +1796,56 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
 
   // Tool 3: Sheet Music Repertoire
   Widget _buildSheetMusicTool() {
+    if (_isLoadingScores) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: CircularProgressIndicator(color: AppTheme.accentSky),
+        ),
+      );
+    }
+    if (_liveScores.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.picture_as_pdf_rounded, color: AppTheme.textMuted, size: 36),
+              SizedBox(height: 8),
+              Text(
+                'No curriculum scores attached to this session.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _sampleScores.length,
+      itemCount: _liveScores.length,
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
-        final score = _sampleScores[index];
+        final score = _liveScores[index];
         final isSelected = _activeScoreIndex == index;
+        final title = score['title']?.toString() ?? 'Curriculum Score';
+        final course = score['course']?.toString() ?? widget.session.courseName;
+        final instrument = score['instrument']?.toString() ?? 'Faculty';
+        final url = score['url']?.toString() ?? '';
         return InkWell(
-          onTap: () {
+          onTap: () async {
             setState(() {
               _activeScoreIndex = index;
             });
             HapticFeedback.selectionClick();
+            if (url.isNotEmpty) {
+              final uri = Uri.tryParse(url);
+              if (uri != null) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            }
           },
           borderRadius: BorderRadius.circular(8),
           child: Container(
@@ -1839,7 +1870,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        score['title']!,
+                        title,
                         style: const TextStyle(
                           color: AppTheme.textWhite,
                           fontSize: 12,
@@ -1849,7 +1880,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${score['key']} • ${score['tempo']} • ${score['status']}',
+                        course,
                         style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
                       ),
                     ],
@@ -1862,7 +1893,7 @@ class _KMCLiveStudioScreenState extends State<KMCLiveStudioScreen>
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    score['instrument']!,
+                    instrument,
                     style: const TextStyle(color: AppTheme.accentSky, fontSize: 9),
                   ),
                 ),

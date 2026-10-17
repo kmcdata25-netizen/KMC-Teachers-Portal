@@ -14,8 +14,8 @@ class TeacherLoginScreen extends StatefulWidget {
 }
 
 class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
-  final _identifierController = TextEditingController(text: 'david.otieno@kasaranimusic.ac.ke');
-  final _passwordController = TextEditingController(text: '123456');
+  final _identifierController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;

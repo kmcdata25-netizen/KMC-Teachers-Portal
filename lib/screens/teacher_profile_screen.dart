@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
@@ -330,7 +331,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     final now = DateTime.now();
     final monthName = _getMonthName(now.month);
     final hours = (_stats['teachingHours'] as num?)?.toDouble() ?? 0.0;
-    final rate = _profile.hourlyRate > 0 ? _profile.hourlyRate : 1800.0;
+    final rate = _profile.hourlyRate;
     final estimatedTotal = (hours * rate).round();
     final formattedTotal = estimatedTotal.toString().replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
@@ -606,7 +607,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                 studentName: 'Studio Cohort (Open Masterclass)',
                 studentId: 'STUDIO-OPEN',
                 timeSlot: 'Live Masterclass Broadcast',
-                studio: _profile.studio.isNotEmpty ? _profile.studio : 'Studio 3 (Yamaha C7 Grand)',
+                studio: _profile.studio.isNotEmpty ? _profile.studio : 'Studio Masterclass',
                 attendance: AttendanceState.present,
                 topic: 'Technique, Repertoire & Interactive Coaching',
                 isLiveNow: true,
@@ -818,13 +819,6 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   }
 
   void _showSheetMusicSheet(BuildContext context) {
-    final sampleItems = [
-      {'title': 'J.S. Bach – Inventions & Sinfonias (Urtext)', 'type': 'PDF', 'size': '4.2 MB'},
-      {'title': 'Autumn Leaves – Jazz Lead Sheet with Chords', 'type': 'PDF', 'size': '1.8 MB'},
-      {'title': 'Hanon – The Virtuoso Pianist (60 Exercises)', 'type': 'PDF', 'size': '7.5 MB'},
-      {'title': 'Blues in F – Drum & Upright Bass Backing Track', 'type': 'MP3', 'size': '5.4 MB'},
-    ];
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -866,47 +860,87 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                     ],
                   ),
                   const SizedBox(height: 14),
-                  ...sampleItems.map(
-                    (item) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryBackground,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.borderOutline),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            item['type'] == 'PDF' ? Icons.picture_as_pdf_rounded : Icons.audiotrack_rounded,
-                            color: item['type'] == 'PDF' ? AppTheme.brandGold : AppTheme.brandGreen,
-                            size: 22,
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: TeacherSupabaseService.instance.fetchCurriculumSheetMusic(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 40),
+                            child: CircularProgressIndicator(color: AppTheme.brandGreen),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        );
+                      }
+                      final items = snapshot.data ?? [];
+                      if (items.isEmpty) {
+                        return const TeacherEmptyState(
+                          title: 'No Sheet Music Found',
+                          message: 'No curriculum scores or sheet music have been uploaded to Central Mind yet.',
+                          icon: Icons.picture_as_pdf_outlined,
+                        );
+                      }
+                      return Column(
+                        children: items.map((item) {
+                          final title = item['title']?.toString() ?? 'Sheet Music';
+                          final course = item['course']?.toString() ?? 'Curriculum';
+                          final type = item['type']?.toString() ?? 'PDF';
+                          final url = item['url']?.toString() ?? '';
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryBackground,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppTheme.borderOutline),
+                            ),
+                            child: Row(
                               children: [
-                                Text(item['title']!, style: const TextStyle(color: AppTheme.textWhite, fontSize: 12.5, fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 2),
-                                Text('${item['type']} • ${item['size']}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                                const Icon(
+                                  Icons.picture_as_pdf_rounded,
+                                  color: AppTheme.brandGold,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        style: const TextStyle(color: AppTheme.textWhite, fontSize: 12.5, fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '$type • $course',
+                                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.open_in_new_rounded, color: AppTheme.brandGreen, size: 18),
+                                  onPressed: () async {
+                                    if (url.isNotEmpty) {
+                                      final uri = Uri.tryParse(url);
+                                      if (uri != null) {
+                                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                      }
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('No URL found for $title'),
+                                          backgroundColor: AppTheme.surfaceCard,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
                               ],
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.download_rounded, color: AppTheme.brandGreen, size: 18),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('✓ Material downloaded: ${item['title']}'),
-                                  backgroundColor: AppTheme.brandGreen,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
+                          );
+                        }).toList(),
+                      );
+                    },
                   ),
                 ],
               ),

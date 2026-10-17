@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_notification_service.dart';
+import '../services/teacher_supabase_service.dart';
 import '../theme/app_theme.dart';
 import 'kmc_live_studio_screen.dart';
 
@@ -373,14 +374,18 @@ class _TeacherNotificationsScreenState
                                       FilledButton.icon(
                                         onPressed: () {
                                           _markItemRead(item);
+                                          final currentT = TeacherSupabaseService.instance.currentTeacher;
+                                          final fallbackStudio = currentT?.assignedStudio.isNotEmpty == true
+                                              ? currentT!.assignedStudio
+                                              : (currentT?.studio.isNotEmpty == true ? currentT!.studio : 'Studio 1');
                                           final fallbackSession = TeacherClass(
                                             id: item['id']?.toString() ?? 'session_live_notice',
                                             courseName: title,
                                             level: 'Masterclass',
                                             studentName: 'Studio Class Cohort',
                                             studentId: 'STUDIO-LIVE',
-                                            timeSlot: '10:00 - 11:30 AM',
-                                            studio: 'Studio 3 (Yamaha C7 Grand)',
+                                            timeSlot: 'Live Masterclass',
+                                            studio: fallbackStudio,
                                             attendance: AttendanceState.present,
                                             topic: body.isNotEmpty ? body : 'Masterclass Broadcast',
                                             isLiveNow: true,

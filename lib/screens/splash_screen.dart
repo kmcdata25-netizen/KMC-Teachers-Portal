@@ -16,87 +16,66 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  Timer? _ticker;
-  DateTime? _startTime;
-  static const int _totalDurationMs = 3800; // Guaranteed visible 3.8s preloader
-
-  double _progress = 0.0;
+  double _progress = 0.25;
   bool _entered = false;
-  String _loadingMessage = 'Initializing Faculty Portal Engine...';
+  String _loadingMessage = 'Connecting to Central Mind...';
 
   @override
   void initState() {
     super.initState();
     debugPrint('[KMC] SplashScreen initialized on device');
 
-    // Trigger visual entrance animation shortly after widget mounts
     Future.delayed(const Duration(milliseconds: 60), () {
-      if (mounted) {
-        setState(() => _entered = true);
-      }
+      if (mounted) setState(() => _entered = true);
     });
 
-    // Start wall-clock progress timer strictly AFTER first frame is painted
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _startTime = DateTime.now();
-
-      _ticker = Timer.periodic(const Duration(milliseconds: 30), (timer) {
-        if (!mounted || _startTime == null) {
-          timer.cancel();
-          return;
-        }
-
-        final elapsed = DateTime.now().difference(_startTime!).inMilliseconds;
-        final rawProgress = (elapsed / _totalDurationMs).clamp(0.0, 1.0);
-
-        String newMessage;
-        if (rawProgress < 0.28) {
-          newMessage = 'Initializing Faculty Portal Engine...';
-        } else if (rawProgress < 0.58) {
-          newMessage = 'Loading Studio Allocations & Timetables...';
-        } else if (rawProgress < 0.88) {
-          newMessage = 'Syncing Student Practice Submissions...';
-        } else if (rawProgress < 1.0) {
-          newMessage = 'Verifying Faculty Credentials...';
-        } else {
-          newMessage = 'Welcome, Maestro! Entering Portal...';
-        }
-
-        setState(() {
-          _progress = rawProgress;
-          _loadingMessage = newMessage;
-        });
-
-        if (rawProgress >= 1.0) {
-          timer.cancel();
-          debugPrint('[KMC] Preload complete, checking saved faculty session');
-          Future.delayed(const Duration(milliseconds: 350), () async {
-            if (!mounted) return;
-            final session = await TeacherSupabaseService.instance.checkSavedSession();
-            if (!mounted) return;
-            final targetScreen = session != null
-                ? const MainTeacherShell()
-                : const TeacherLoginScreen();
-
-            Navigator.of(context).pushReplacement(
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) => targetScreen,
-                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-                transitionDuration: const Duration(milliseconds: 600),
-              ),
-            );
-          });
-        }
-      });
+      _initializePortal();
     });
+  }
+
+  Future<void> _initializePortal() async {
+    try {
+      setState(() {
+        _progress = 0.45;
+        _loadingMessage = 'Verifying Faculty Credentials...';
+      });
+
+      final session = await TeacherSupabaseService.instance.checkSavedSession();
+      if (!mounted) return;
+
+      setState(() {
+        _progress = 1.0;
+        _loadingMessage = 'Welcome to Kasarani Music Center';
+      });
+
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+
+      final targetScreen = session != null
+          ? const MainTeacherShell()
+          : const TeacherLoginScreen();
+
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) => targetScreen,
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 400),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[KMC] Splash error: $e');
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const TeacherLoginScreen()),
+      );
+    }
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
     super.dispose();
   }
 

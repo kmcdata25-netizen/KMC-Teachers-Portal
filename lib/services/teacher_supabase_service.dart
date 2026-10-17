@@ -21,6 +21,7 @@ class TeacherSupabaseService {
   // Cached active teacher profile
   TeacherProfile? _activeTeacher;
   TeacherProfile? get activeTeacher => _activeTeacher;
+  TeacherProfile? get currentTeacher => _activeTeacher;
 
   // ---------------------------------------------------------------------------
   // AUTHENTICATION & FACULTY AUTHORIZATION
@@ -288,20 +289,23 @@ class TeacherSupabaseService {
     final firstName = prof['first_name']?.toString() ?? '';
     final lastName = prof['last_name']?.toString() ?? '';
     final fullName = '$firstName $lastName'.trim();
-    final rawStudentId = prof['student_id']?.toString() ?? 'KMC-2026-1004';
+    final rawStudentId = prof['student_id']?.toString() ?? '';
 
     // Format into standard KMC faculty code (e.g. KMC-FAC-014 or KMC-FAC-004)
     String facultyCode = rawStudentId;
     if (rawStudentId.startsWith('KMC-2026-')) {
       final suffix = rawStudentId.replaceFirst('KMC-2026-', '');
       facultyCode = 'KMC-FAC-$suffix';
+    } else if (facultyCode.isEmpty && prof['id'] != null) {
+      final idStr = prof['id'].toString();
+      facultyCode = 'KMC-FAC-${idStr.length >= 4 ? idStr.substring(0, 4).toUpperCase() : "001"}';
     }
 
-    final email = prof['email']?.toString() ?? 'faculty@kasaranimusic.ac.ke';
-    final phone = prof['phone']?.toString() ?? '+254 700 000 000';
+    final email = prof['email']?.toString() ?? '';
+    final phone = prof['phone']?.toString() ?? '';
     final teacherTableId = teacher?['id']?.toString() ?? '';
 
-    List<String> instruments = ['Contemporary Jazz Piano', 'Keyboards'];
+    List<String> instruments = [];
     if (teacher != null && teacher['instruments'] != null) {
       final raw = teacher['instruments'];
       if (raw is List) {
@@ -311,15 +315,15 @@ class TeacherSupabaseService {
       }
     }
 
-    final hourlyRate = (teacher?['hourly_rate'] as num?)?.toDouble() ?? 1500.0;
-    final rating = (teacher?['rating'] as num?)?.toDouble() ?? 5.0;
+    final hourlyRate = (teacher?['hourly_rate'] as num?)?.toDouble() ?? 0.0;
+    final rating = (teacher?['rating'] as num?)?.toDouble() ?? 0.0;
     final isActive = teacher?['is_active'] != false;
 
     final initials = fullName.isNotEmpty
         ? fullName.split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join()
-        : 'FA';
+        : 'FC';
 
-    List<String> availableDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    List<String> availableDays = [];
     if (teacher != null && teacher['available_days'] != null) {
       final rawDays = teacher['available_days'];
       if (rawDays is List) {
@@ -327,16 +331,21 @@ class TeacherSupabaseService {
       }
     }
 
+    final assignedStudio = teacher?['assigned_studio']?.toString() ??
+        (prof['studio']?.toString() ?? '');
+    final department = teacher?['department']?.toString() ??
+        (prof['department']?.toString() ?? 'Faculty of Music');
+
     return TeacherProfile(
       id: prof['id']?.toString() ?? '',
       teacherTableId: teacherTableId,
-      name: fullName.isNotEmpty ? fullName : 'KMC Instructor',
-      title: 'Senior ${instruments.isNotEmpty ? instruments.first : "Music"} Faculty',
+      name: fullName.isNotEmpty ? fullName : (email.isNotEmpty ? email : 'Faculty Instructor'),
+      title: instruments.isNotEmpty ? 'Instructor of ${instruments.first}' : 'Faculty Instructor',
       facultyId: facultyCode,
-      department: 'Faculty of Music Performance & Production',
+      department: department,
       email: email,
       phone: phone,
-      studio: 'Studio 3 — Yamaha C7 Acoustic Grand',
+      studio: assignedStudio,
       status: isActive ? '🟢 Available & In Studio' : '🟡 On Leave',
       avatarInitials: initials,
       hourlyRate: hourlyRate,
@@ -363,11 +372,21 @@ class TeacherSupabaseService {
         final now = DateTime.now();
         final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
+        // Build dual-ID filter to match sessions scheduled by Admin using either ID
+        final teacherIds = <String>[];
+        if (teacher.id.isNotEmpty) teacherIds.add(teacher.id);
+        if (teacher.teacherTableId.isNotEmpty && teacher.teacherTableId != teacher.id) {
+          teacherIds.add(teacher.teacherTableId);
+        }
+        final orFilter = teacherIds.isNotEmpty
+            ? teacherIds.map((tid) => 'teacher_id.eq.$tid').join(',')
+            : 'teacher_id.eq.${teacher.id}';
+
         // 1. Live sessions scheduled for this teacher today
         final todaySessions = await client
             .from('live_sessions')
             .select('id, scheduled_at, status')
-            .eq('teacher_id', teacher.id);
+            .or(orFilter);
 
         for (final s in todaySessions) {
           final sched = s['scheduled_at']?.toString() ?? '';
@@ -384,7 +403,7 @@ class TeacherSupabaseService {
         final allSessions = await client
             .from('live_sessions')
             .select('student_id')
-            .eq('teacher_id', teacher.id);
+            .or(orFilter);
         for (final s in allSessions) {
           final sId = s['student_id']?.toString();
           if (sId != null && sId.isNotEmpty) studentIds.add(sId);
@@ -423,7 +442,7 @@ class TeacherSupabaseService {
       'activeStudents': activeStudents,
       'classesToday': classesToday,
       'pendingReviews': pendingReviews,
-      'teachingHours': teachingHours > 0 ? teachingHours : 24.0, // verified cycle hours
+      'teachingHours': teachingHours,
     };
   }
 
@@ -464,8 +483,9 @@ class TeacherSupabaseService {
         final course = _safeMap(m['courses']);
 
         final studentName = "${prof['first_name'] ?? ''} ${prof['last_name'] ?? ''}".trim();
-        final courseTitle = course['title']?.toString() ?? (m['course_id'] != null ? 'Music Performance' : 'Studio Masterclass');
-        final studioRoom = m['jitsi_room_name']?.toString() ?? 'Studio 3 (Yamaha C7 Grand)';
+        final courseTitle = course['title']?.toString() ?? (m['course_id'] != null ? 'Music Performance' : 'Studio Session');
+        final studioRoom = m['studio_name']?.toString() ??
+            (m['jitsi_room_name']?.toString() ?? (teacher.studio.isNotEmpty ? teacher.studio : 'Assigned Studio'));
         final statusStr = m['status']?.toString() ?? 'scheduled';
         final notes = m['instructor_notes']?.toString() ?? '';
 
@@ -486,20 +506,21 @@ class TeacherSupabaseService {
         }
 
         final profId = prof['id']?.toString() ?? m['student_id']?.toString() ?? '';
-        final studentAdmissionId = prof['student_id']?.toString() ?? 'KMC-2026-1001';
+        final studentAdmissionId = prof['student_id']?.toString() ??
+            (profId.length >= 6 ? 'KMC-${profId.substring(0, 6).toUpperCase()}' : '');
 
         final tc = TeacherClass(
           id: m['id']?.toString() ?? '',
           courseName: courseTitle,
-          level: course['level']?.toString() ?? 'Intermediate',
-          studentName: studentName.isNotEmpty ? studentName : 'Enrolled Student',
+          level: course['level']?.toString() ?? '',
+          studentName: studentName.isNotEmpty ? studentName : (prof['email']?.toString() ?? 'Enrolled Student'),
           studentId: studentAdmissionId,
           studentProfileId: profId,
           studentPhone: prof['phone']?.toString() ?? '',
           studentEmail: prof['email']?.toString() ?? '',
           timeSlot: '$timeFormatted – 1 hour',
           studio: studioRoom,
-          topic: notes.isNotEmpty ? notes : 'Technique & Repertoire Drill',
+          topic: notes.isNotEmpty ? notes : (courseTitle.isNotEmpty ? courseTitle : 'Scheduled Session'),
           notes: notes,
           attendance: state,
           isLiveNow: statusStr == 'live',
@@ -764,9 +785,10 @@ class TeacherSupabaseService {
           }
         }
 
-        // Progress calculation based on completed lessons against standard module (12 lessons)
+        // Progress calculation based on completed sessions against total booked sessions
+        final totalEnrolledSessions = studentSessions.isNotEmpty ? studentSessions.length : 1;
         final double progress = completedSessions > 0
-            ? (completedSessions / 12.0).clamp(0.0, 1.0)
+            ? (completedSessions / totalEnrolledSessions).clamp(0.0, 1.0)
             : 0.0;
 
         students.add(StudentRosterItem(
@@ -818,24 +840,65 @@ class TeacherSupabaseService {
         final lesson = _safeMap(chk['lessons']);
 
         final studentName = "${prof['first_name'] ?? ''} ${prof['last_name'] ?? ''}".trim();
-        final studentId = prof['student_id']?.toString() ?? 'KMC-2026-1001';
+        final profId = prof['id']?.toString() ?? m['student_id']?.toString() ?? '';
+        final studentId = prof['student_id']?.toString() ??
+            (profId.length >= 6 ? 'KMC-${profId.substring(0, 6).toUpperCase()}' : '');
         final drillTitle = chk['task_title']?.toString() ?? 'Practice Routine';
         final courseTitle = lesson['title']?.toString() ?? 'Masterclass Drill';
         final isCompleted = m['is_completed'] == true;
         final notes = m['teacher_notes']?.toString() ?? '';
 
+        final createdAtStr = m['created_at']?.toString() ?? m['updated_at']?.toString() ?? '';
+        final createdDt = DateTime.tryParse(createdAtStr)?.toLocal();
+        String formattedSubmittedTime = 'Recent Take';
+        if (createdDt != null) {
+          final now = DateTime.now();
+          final isToday = createdDt.year == now.year && createdDt.month == now.month && createdDt.day == now.day;
+          final hour = createdDt.hour;
+          final minute = createdDt.minute.toString().padLeft(2, '0');
+          final period = hour >= 12 ? 'PM' : 'AM';
+          final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+          formattedSubmittedTime = isToday ? 'Today @ $h12:$minute $period' : '${createdDt.day}/${createdDt.month} @ $h12:$minute $period';
+        }
+
+        final rawDuration = m['duration_seconds'] ?? m['duration'];
+        String formattedDuration = 'Practice Take';
+        if (rawDuration != null) {
+          final secs = int.tryParse(rawDuration.toString()) ?? 0;
+          final mins = secs ~/ 60;
+          final remSecs = secs % 60;
+          formattedDuration = '${mins.toString().padLeft(2, '0')}:${remSecs.toString().padLeft(2, '0')} mins';
+        }
+
+        final mediaUrl = m['media_url']?.toString();
+        String mediaType = m['media_type']?.toString() ?? 'Audio';
+        if (mediaUrl != null && mediaUrl.isNotEmpty) {
+          final lower = mediaUrl.toLowerCase();
+          if (lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm')) {
+            mediaType = 'Video';
+          } else if (lower.endsWith('.pdf')) {
+            mediaType = 'Score';
+          } else {
+            mediaType = 'Audio';
+          }
+        }
+
+        final studentNotes = m['student_notes']?.toString() ?? '';
+        final ratingVal = (m['rating'] as num?)?.toDouble();
+
         subs.add(StudentSubmission(
           id: m['id']?.toString() ?? '',
-          studentName: studentName.isNotEmpty ? studentName : 'KMC Student',
+          studentName: studentName.isNotEmpty ? studentName : (prof['email']?.toString() ?? 'KMC Student'),
           studentId: studentId,
           courseTitle: courseTitle,
           drillTitle: drillTitle,
-          submittedTime: 'Today at 02:15 PM',
-          durationText: '04:12 mins',
-          mediaType: 'Audio',
-          studentNotes: 'Practiced metronome alignment from 60 to 90 BPM as advised.',
+          submittedTime: formattedSubmittedTime,
+          durationText: formattedDuration,
+          mediaType: mediaType,
+          mediaUrl: mediaUrl,
+          studentNotes: studentNotes,
           isReviewed: isCompleted,
-          rating: isCompleted ? 4.8 : null,
+          rating: ratingVal,
           teacherFeedback: notes.isNotEmpty ? notes : null,
         ));
       }
@@ -875,6 +938,47 @@ class TeacherSupabaseService {
     } catch (e) {
       debugPrint('[TeacherApp] Submit drill review notice: $e');
       return false;
+    }
+  }
+
+  /// Fetch authentic curriculum sheet music & PDF scores from Central Mind `lessons` table
+  Future<List<Map<String, dynamic>>> fetchCurriculumSheetMusic({String? courseId, String? courseName}) async {
+    final client = _client;
+    if (client == null) return [];
+
+    try {
+      var query = client
+          .from('lessons')
+          .select('id, title, duration_minutes, pdf_attachment_url, notes, order_index, courses(title, instrument)')
+          .not('pdf_attachment_url', 'is', null)
+          .neq('pdf_attachment_url', '');
+
+      if (courseId != null && courseId.isNotEmpty && _isUuid(courseId)) {
+        query = query.eq('course_id', courseId);
+      }
+
+      final res = await query.order('order_index');
+      final list = res as List;
+      final results = <Map<String, dynamic>>[];
+      for (final row in list) {
+        final pdf = row['pdf_attachment_url']?.toString();
+        if (pdf != null && pdf.isNotEmpty) {
+          final course = _safeMap(row['courses']);
+          results.add({
+            'id': row['id']?.toString() ?? '',
+            'title': row['title']?.toString() ?? 'Curriculum Sheet Music',
+            'url': pdf,
+            'type': 'PDF',
+            'course': course['title']?.toString() ?? courseName ?? 'Curriculum',
+            'instrument': course['instrument']?.toString() ?? 'General',
+            'notes': row['notes']?.toString() ?? '',
+          });
+        }
+      }
+      return results;
+    } catch (e) {
+      debugPrint('[TeacherApp] Fetch curriculum sheet music notice: $e');
+      return [];
     }
   }
 

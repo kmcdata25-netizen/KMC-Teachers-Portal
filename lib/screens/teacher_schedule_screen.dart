@@ -680,19 +680,22 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
     if (!mounted) return;
 
     StudentRosterItem? selectedStudent = students.isNotEmpty ? students.first : null;
-    String selectedStudio = 'Studio 3 (Yamaha C7 Grand)';
-    final topicController = TextEditingController(text: 'Repertoire Drill & Technique Coaching');
+    final assignedStudio = _teacher?.assignedStudio.trim();
+    final defaultStudio = (assignedStudio != null && assignedStudio.isNotEmpty) ? assignedStudio : 'Studio 1';
+    String selectedStudio = defaultStudio;
+    final topicController = TextEditingController();
     DateTime selectedDate = _weekDays[_selectedDayIndex];
     TimeOfDay selectedTime = const TimeOfDay(hour: 10, minute: 0);
     bool isSaving = false;
 
-    final studios = [
-      'Studio 1 — Roland Digital Lab',
-      'Studio 2 — Fender / Drum Clinician Suite',
-      'Studio 3 (Yamaha C7 Grand)',
-      'Studio 4 — Vocal & Wind Room',
-      'Theory Lab 1',
-    ];
+    final List<String> studios = <String>{
+      if (assignedStudio != null && assignedStudio.isNotEmpty) assignedStudio,
+      'Studio 1',
+      'Studio 2',
+      'Studio 3',
+      'Studio 4',
+      'Studio 5',
+    }.toList();
 
     if (!mounted) return;
     showDialog(
@@ -747,8 +750,8 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
                         fillColor: AppTheme.surfaceElevated,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       ),
-                      items: studios.map((st) {
-                        return DropdownMenuItem(value: st, child: Text(st, overflow: TextOverflow.ellipsis));
+                      items: studios.map((String st) {
+                        return DropdownMenuItem<String>(value: st, child: Text(st, overflow: TextOverflow.ellipsis));
                       }).toList(),
                       onChanged: (val) => setDlgState(() => selectedStudio = val ?? selectedStudio),
                     ),

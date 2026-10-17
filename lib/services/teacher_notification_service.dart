@@ -441,32 +441,6 @@ class TeacherNotificationService {
         }
       }
 
-      // Fallback to active promotions if notifications table is empty
-      if (results.isEmpty) {
-        try {
-          final promoRes = await client
-              .from('promotions')
-              .select()
-              .eq('is_active', true)
-              .order('created_at', ascending: false)
-              .limit(10);
-          final pList = promoRes as List;
-          for (final p in pList) {
-            final pm = Map<String, dynamic>.from(p as Map);
-            final pId = pm['id']?.toString() ?? 'promo_${results.length}';
-            results.add({
-              'id': pId,
-              'title': pm['title']?.toString() ?? 'KMC Faculty Memo',
-              'message': pm['subtitle']?.toString() ?? (pm['description']?.toString() ?? ''),
-              'category': 'Official Notice',
-              'sender_name': 'KMC Academic Office',
-              'created_at': pm['created_at'],
-              'is_read_local': _readNoticeIds.contains(pId),
-            });
-          }
-        } catch (_) {}
-      }
-
       _cachedAnnouncements = results;
       _updateUnreadCount();
       return results;

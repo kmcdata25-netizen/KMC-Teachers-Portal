@@ -78,7 +78,11 @@ class _StudentCommunicationSheetState extends State<StudentCommunicationSheet> {
     super.initState();
     final course = widget.courseTitle ?? 'Instrument Studies';
     final time = widget.defaultTimeSlot ?? 'Upcoming Session';
-    final studio = widget.defaultStudio ?? 'Studio 3';
+    final activeT = TeacherSupabaseService.instance.activeTeacher;
+    final studio = widget.defaultStudio ??
+        (activeT?.studio.isNotEmpty == true
+            ? activeT!.studio
+            : 'Studio Room');
 
     _titleController = TextEditingController(
       text: '[$course] Session Update — $time',

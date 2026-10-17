@@ -421,16 +421,22 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () {
+                      final defaultStudio = profile.assignedStudio.trim().isNotEmpty
+                          ? profile.assignedStudio.trim()
+                          : (profile.studio.trim().isNotEmpty ? profile.studio.trim() : 'Studio 1');
+                      final courseName = profile.department.trim().isNotEmpty
+                          ? '${profile.department.trim()} Masterclass'
+                          : 'Faculty Studio Masterclass';
                       final onDemandSession = TeacherClass(
                         id: 'live_studio_${DateTime.now().millisecondsSinceEpoch}',
-                        courseName: 'Faculty Studio Masterclass',
+                        courseName: courseName,
                         level: 'All Levels',
                         studentName: 'Studio Cohort (Open Masterclass)',
                         studentId: 'STUDIO-OPEN',
                         timeSlot: 'Live Masterclass Broadcast',
-                        studio: profile.studio.isNotEmpty ? profile.studio : 'Studio 3 (Yamaha C7 Grand)',
+                        studio: defaultStudio,
                         attendance: AttendanceState.present,
-                        topic: 'Technique, Repertoire & Interactive Coaching',
+                        topic: 'Faculty Live Masterclass Session',
                         isLiveNow: true,
                       );
                       Navigator.of(context).push(
