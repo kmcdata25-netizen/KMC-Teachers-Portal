@@ -1,9 +1,9 @@
 {
   "app_name": "KMC Teacher Portal",
   "package_id": "ke.ac.kasaranimusic.kmc_teacher_app",
-  "latest_version": "1.0.14",
-  "latest_build_number": 18,
-  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.14/KMC_Teacher_Portal_v1.0.14_b18.apk",
-  "release_notes": "v1.0.14+18 - Complete Eradication of Static Submissions & Strict Central Mind Auth\n- Purged all legacy static drill submissions (including Emmanuel Omondi & mock evaluations)\n- Verified 100% live database querying from Central Mind student_checklist_progress\n- Implemented strict Supabase Auth with custom faculty email and password\n- Synchronized Teacher login/logout model with Admin App onboarding\n- High-fidelity acoustic WebRTC studio preserved",
+  "latest_version": "1.0.15",
+  "latest_build_number": 19,
+  "apk_url": "https://github.com/kmcdata25-netizen/KMC-Teachers-Portal/releases/download/v1.0.15/KMC_Teacher_Portal_v1.0.15_b19.apk",
+  "release_notes": "v1.0.15+19 - Unified Student Roster, Drill Evaluation & Central Mind Relational Sync\n- Unified activeStudents KPI and My Students roster across live_sessions and courses.instructor_id\n- Separated student task completion from teacher verification (verified_by_teacher FK & star rating persistence)\n- Added persistent 'excused' attendance state and preserved proctor/assignment metadata in instructor_notes\n- Connected Faculty Materials Library to live curriculum lessons and store_items PDFs\n- Dual-ID notification matching (profiles.id & teachers.id) for real-time broadcasts",
   "force_update": false
 }
