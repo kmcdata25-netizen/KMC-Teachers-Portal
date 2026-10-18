@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../data/mock_teacher_data.dart';
 import '../services/teacher_notification_service.dart';
 import '../services/teacher_supabase_service.dart';
@@ -1014,7 +1015,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 
   void _showFacultyMaterialsSheet(BuildContext context) {
-    final List<Map<String, String>> materials = [];
+    final materialsFuture = TeacherSupabaseService.instance.fetchCurriculumSheetMusic(
+      teacherId: profile.id,
+    );
 
     showModalBottomSheet(
       context: context,
@@ -1086,118 +1089,151 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   ),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: materials.isEmpty
-                        ? Center(
+                    child: FutureBuilder<List<Map<String, dynamic>>>(
+                      future: materialsFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(color: AppTheme.brandGold),
+                          );
+                        }
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: TeacherEmptyState.offline(),
+                          );
+                        }
+                        final materials = snapshot.data ?? [];
+                        if (materials.isEmpty) {
+                          return Center(
                             child: TeacherEmptyState.empty(
                               title: 'Resource Library Empty',
                               message: 'There are currently no instructional materials or stems in the library.',
                               icon: Icons.library_music_outlined,
                             ),
-                          )
-                        : ListView.separated(
-                      controller: scrollController,
-                      itemCount: materials.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final item = materials[index];
-                        final isPdf = item['type'] == 'PDF';
-                        final isMp3 = item['type'] == 'MP3';
+                          );
+                        }
+                        return ListView.separated(
+                          controller: scrollController,
+                          itemCount: materials.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final item = materials[index];
+                            final typeStr = (item['type'] ?? 'PDF').toString().toUpperCase();
+                            final isPdf = typeStr == 'PDF';
+                            final isMp3 = typeStr == 'MP3' || typeStr == 'AUDIO';
+                            final titleStr = (item['title'] ?? 'Curriculum Resource').toString();
+                            final categoryStr = (item['category'] ?? item['course'] ?? 'Curriculum').toString();
+                            final sizeStr = (item['size'] ?? 'Cloudflare R2').toString();
+                            final descStr = (item['desc'] ?? item['notes'] ?? '').toString();
+                            final urlStr = (item['url'] ?? '').toString();
 
-                        return Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryBackground,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTheme.borderOutline),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryBackground,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppTheme.borderOutline),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    width: 38,
-                                    height: 38,
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.surfaceElevated,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: isPdf
-                                            ? AppTheme.brandGold.withValues(alpha: 0.5)
-                                            : isMp3
-                                                ? AppTheme.brandGreen.withValues(alpha: 0.5)
-                                                : AppTheme.accentSky.withValues(alpha: 0.5),
-                                      ),
-                                    ),
-                                    child: Icon(
-                                      isPdf
-                                          ? Icons.picture_as_pdf_rounded
-                                          : isMp3
-                                              ? Icons.audiotrack_rounded
-                                              : Icons.description_rounded,
-                                      color: isPdf
-                                          ? AppTheme.brandGold
-                                          : isMp3
-                                              ? AppTheme.brandGreen
-                                              : AppTheme.accentSky,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item['title']!,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: AppTheme.textWhite,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 38,
+                                        height: 38,
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.surfaceElevated,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isPdf
+                                                ? AppTheme.brandGold.withValues(alpha: 0.5)
+                                                : isMp3
+                                                    ? AppTheme.brandGreen.withValues(alpha: 0.5)
+                                                    : AppTheme.accentSky.withValues(alpha: 0.5),
                                           ),
                                         ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '${item['category']} • ${item['type']} • ${item['size']}',
-                                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                        child: Icon(
+                                          isPdf
+                                              ? Icons.picture_as_pdf_rounded
+                                              : isMp3
+                                                  ? Icons.audiotrack_rounded
+                                                  : Icons.description_rounded,
+                                          color: isPdf
+                                              ? AppTheme.brandGold
+                                              : isMp3
+                                                  ? AppTheme.brandGreen
+                                                  : AppTheme.accentSky,
+                                          size: 20,
                                         ),
-                                      ],
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              titleStr,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: AppTheme.textWhite,
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              '$categoryStr • $typeStr • $sizeStr',
+                                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (descStr.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      descStr,
+                                      style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                                     ),
+                                  ],
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: () async {
+                                          Navigator.pop(ctx);
+                                          if (urlStr.isNotEmpty) {
+                                            final uri = Uri.tryParse(urlStr);
+                                            if (uri != null) {
+                                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                            }
+                                          }
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('✓ Material ready: $titleStr'),
+                                                backgroundColor: AppTheme.brandGreen,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        icon: const Icon(Icons.download_rounded, size: 14),
+                                        label: const Text('Open / Save', style: TextStyle(fontSize: 11)),
+                                        style: OutlinedButton.styleFrom(
+                                          minimumSize: const Size(0, 32),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                item['desc']!,
-                                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                              ),
-                              const SizedBox(height: 10),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  OutlinedButton.icon(
-                                    onPressed: () {
-                                      Navigator.pop(ctx);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('✓ Material ready: ${item['title']}'),
-                                          backgroundColor: AppTheme.brandGreen,
-                                        ),
-                                      );
-                                    },
-                                    icon: const Icon(Icons.download_rounded, size: 14),
-                                    label: const Text('Open / Save', style: TextStyle(fontSize: 11)),
-                                    style: OutlinedButton.styleFrom(
-                                      minimumSize: const Size(0, 32),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         );
                       },
                     ),

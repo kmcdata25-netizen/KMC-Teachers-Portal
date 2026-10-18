@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_config.dart';
+import 'teacher_supabase_service.dart';
 
 /// Service managing native Android notifications for KMC Faculty & Teachers.
 /// Listens to real-time broadcasts and targeted memos dispatched by the Admin Suite.
@@ -22,7 +23,9 @@ class TeacherNotificationService {
   RealtimeChannel? _realtimeChannel;
 
   String? _currentTeacherId;
+  String? _currentTeacherTableId;
   String? _currentFacultyCode;
+  String? _currentTeacherName;
 
   final Set<String> _seenNoticeIds = {};
   static const String _prefsSeenKey = 'kmc_teacher_seen_notices_v1';
@@ -204,10 +207,15 @@ class TeacherNotificationService {
   /// Also starts a background periodic poller (15s) for guaranteed delivery.
   Future<void> startRealtimeBroadcastListener({
     String? teacherId,
+    String? teacherTableId,
     String? facultyCode,
+    String? teacherName,
   }) async {
-    _currentTeacherId = teacherId;
-    _currentFacultyCode = facultyCode;
+    final active = TeacherSupabaseService.instance.activeTeacher;
+    _currentTeacherId = teacherId ?? active?.id;
+    _currentTeacherTableId = teacherTableId ?? active?.teacherTableId;
+    _currentFacultyCode = facultyCode ?? active?.facultyId;
+    _currentTeacherName = teacherName ?? active?.name;
 
     await initialize();
     await requestPermission();
@@ -223,6 +231,94 @@ class TeacherNotificationService {
     _pollerTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _pollForNewBroadcasts(isInitialWarmup: false);
     });
+  }
+
+  /// Alias for startRealtimeBroadcastListener supporting direct invocation.
+  Future<void> startListening({
+    String? teacherId,
+    String? teacherTableId,
+    String? facultyCode,
+    String? teacherName,
+  }) =>
+      startRealtimeBroadcastListener(
+        teacherId: teacherId,
+        teacherTableId: teacherTableId,
+        facultyCode: facultyCode,
+        teacherName: teacherName,
+      );
+
+  bool _isNoticeForCurrentTeacher(Map<String, dynamic> notice) {
+    final active = TeacherSupabaseService.instance.activeTeacher;
+    final profileId = (_currentTeacherId ?? active?.id ?? '').trim();
+    final tableId = (_currentTeacherTableId ?? active?.teacherTableId ?? '').trim();
+    final facultyCode = (_currentFacultyCode ?? active?.facultyId ?? '').trim().toLowerCase();
+    final teacherName = (_currentTeacherName ?? active?.name ?? '').trim().toLowerCase();
+
+    final recipientType = notice['recipient_type']?.toString().toLowerCase() ?? 'all';
+    final recipientId = notice['recipient_id']?.toString().trim() ?? '';
+    final recipientIdLower = recipientId.toLowerCase();
+    final recipientName = notice['recipient_name']?.toString().trim() ?? '';
+    final recipientNameLower = recipientName.toLowerCase();
+    final secRecipientId = notice['secondary_recipient_id']?.toString().trim() ?? '';
+
+    // Check global / faculty broadcast identifiers in recipientType, recipientId, or recipientName
+    if (recipientType == 'all' ||
+        recipientType == 'everyone' ||
+        recipientType == 'faculty' ||
+        recipientType == 'all_faculty' ||
+        recipientIdLower == 'all_faculty' ||
+        recipientIdLower == 'broadcast:all_faculty' ||
+        recipientIdLower == 'broadcast:all' ||
+        recipientNameLower == 'all faculty' ||
+        recipientNameLower == 'all students & faculty') {
+      return true;
+    }
+
+    bool matchesCurrentId(String candidateId) {
+      if (candidateId.isEmpty) return false;
+      if (profileId.isNotEmpty && candidateId == profileId) return true;
+      if (tableId.isNotEmpty && candidateId == tableId) return true;
+      if (facultyCode.isNotEmpty && candidateId.toLowerCase() == facultyCode) return true;
+      return false;
+    }
+
+    bool matchesCurrentName(String candidateName) {
+      final lower = candidateName.toLowerCase();
+      if (lower.isEmpty) return false;
+      if (facultyCode.isNotEmpty && lower == facultyCode) return true;
+      if (teacherName.isNotEmpty && lower == teacherName) return true;
+      return false;
+    }
+
+    if (recipientType == 'individual_teacher' ||
+        recipientType == 'single' ||
+        recipientType == 'teacher') {
+      if (profileId.isNotEmpty || tableId.isNotEmpty) {
+        return matchesCurrentId(recipientId) || matchesCurrentName(recipientName);
+      }
+      return true;
+    }
+
+    if (recipientType == 'pair') {
+      if (profileId.isNotEmpty || tableId.isNotEmpty) {
+        return matchesCurrentId(recipientId) ||
+            matchesCurrentId(secRecipientId) ||
+            matchesCurrentName(recipientName);
+      }
+      return true;
+    }
+
+    // Fallback check if recipient_id directly matches this teacher regardless of recipient_type
+    if (matchesCurrentId(recipientId) || matchesCurrentId(secRecipientId)) {
+      return true;
+    }
+
+    final cat = notice['category']?.toString().toLowerCase() ?? '';
+    if (cat == 'masterclass' || cat == 'general' || cat == 'academic') {
+      return true;
+    }
+
+    return false;
   }
 
   /// Sets up Supabase Realtime subscription on 'notifications' table
@@ -284,36 +380,7 @@ class TeacherNotificationService {
     // If already seen and alerted, skip
     if (_seenNoticeIds.contains(rawId)) return;
 
-    // Check targeting
-    final recipientType = notice['recipient_type']?.toString().toLowerCase() ?? 'all';
-    final recipientId = notice['recipient_id']?.toString() ?? '';
-    final recipientName = notice['recipient_name']?.toString() ?? '';
-    final secRecipientId = notice['secondary_recipient_id']?.toString() ?? '';
-
-    bool isForFaculty = false;
-
-    if (recipientType == 'all' ||
-        recipientType == 'everyone' ||
-        recipientType == 'faculty' ||
-        recipientType == 'all_faculty') {
-      isForFaculty = true;
-    } else if (recipientType == 'individual_teacher' ||
-        recipientType == 'single' ||
-        recipientType == 'teacher') {
-      if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
-        isForFaculty = (recipientId == _currentTeacherId ||
-            recipientName.toLowerCase() == _currentFacultyCode?.toLowerCase());
-      } else {
-        isForFaculty = true;
-      }
-    } else if (recipientType == 'pair') {
-      if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
-        isForFaculty = (recipientId == _currentTeacherId ||
-            secRecipientId == _currentTeacherId);
-      } else {
-        isForFaculty = true;
-      }
-    }
+    final isForFaculty = _isNoticeForCurrentTeacher(notice);
 
     // Always register as seen so we don't alert on next poll
     _seenNoticeIds.add(rawId);
@@ -401,41 +468,8 @@ class TeacherNotificationService {
       for (final row in list) {
         final m = Map<String, dynamic>.from(row as Map);
         final rawId = m['id']?.toString() ?? '';
-        final recipientType = m['recipient_type']?.toString().toLowerCase() ?? 'all';
-        final recipientId = m['recipient_id']?.toString() ?? '';
-        final recipientName = m['recipient_name']?.toString() ?? '';
-        final secRecipientId = m['secondary_recipient_id']?.toString() ?? '';
 
-        bool isForFaculty = false;
-        if (recipientType == 'all' ||
-            recipientType == 'everyone' ||
-            recipientType == 'faculty' ||
-            recipientType == 'all_faculty') {
-          isForFaculty = true;
-        } else if (recipientType == 'individual_teacher' ||
-            recipientType == 'single' ||
-            recipientType == 'teacher') {
-          if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
-            isForFaculty = (recipientId == _currentTeacherId ||
-                recipientName.toLowerCase() == _currentFacultyCode?.toLowerCase());
-          } else {
-            isForFaculty = true;
-          }
-        } else if (recipientType == 'pair') {
-          if (_currentTeacherId != null && _currentTeacherId!.isNotEmpty) {
-            isForFaculty = (recipientId == _currentTeacherId ||
-                secRecipientId == _currentTeacherId);
-          } else {
-            isForFaculty = true;
-          }
-        } else {
-          final cat = m['category']?.toString().toLowerCase() ?? '';
-          if (cat == 'masterclass' || cat == 'general' || cat == 'academic') {
-            isForFaculty = true;
-          }
-        }
-
-        if (isForFaculty) {
+        if (_isNoticeForCurrentTeacher(m)) {
           m['is_read_local'] = _readNoticeIds.contains(rawId);
           results.add(m);
         }

@@ -62,7 +62,9 @@ class _MainTeacherShellState extends State<MainTeacherShell> {
     if (teacher != null) {
       TeacherNotificationService.instance.startRealtimeBroadcastListener(
         teacherId: teacher.id,
+        teacherTableId: teacher.teacherTableId,
         facultyCode: teacher.facultyId,
+        teacherName: teacher.name,
       );
       final stats = await TeacherSupabaseService.instance.fetchTeacherDashboardStats(teacher);
       if (mounted) {

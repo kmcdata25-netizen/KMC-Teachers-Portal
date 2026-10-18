@@ -338,7 +338,7 @@ class TeacherSupabaseService {
     if (teacher != null && teacher['available_days'] != null) {
       final rawDays = teacher['available_days'];
       if (rawDays is List) {
-        availableDays = rawDays.map((d) => d.toString()).toList();
+        availableDays = rawDays.map((d) => _normalizeDayName(d.toString())).toList();
       }
     }
 
@@ -366,6 +366,198 @@ class TeacherSupabaseService {
     );
   }
 
+  String _normalizeDayName(String raw) {
+    final lower = raw.trim().toLowerCase();
+    if (lower.startsWith('mon')) return 'Mon';
+    if (lower.startsWith('tue')) return 'Tue';
+    if (lower.startsWith('wed')) return 'Wed';
+    if (lower.startsWith('thu')) return 'Thu';
+    if (lower.startsWith('fri')) return 'Fri';
+    if (lower.startsWith('sat')) return 'Sat';
+    if (lower.startsWith('sun')) return 'Sun';
+    return raw.trim();
+  }
+
+  /// Resolves the canonical `public.teachers(id)` primary key UUID for a teacher
+  Future<String?> _resolveTeacherTableId([String? candidateId]) async {
+    final client = _client;
+    if (client == null) return null;
+
+    final cachedTableId = _activeTeacher?.teacherTableId.trim() ?? '';
+    if (_isUuid(cachedTableId)) return cachedTableId;
+
+    final searchIds = <String>{
+      if (candidateId != null && _isUuid(candidateId.trim())) candidateId.trim(),
+      if (_activeTeacher != null && _isUuid(_activeTeacher!.id.trim())) _activeTeacher!.id.trim(),
+      if (client.auth.currentUser != null && _isUuid(client.auth.currentUser!.id))
+        client.auth.currentUser!.id,
+    };
+
+    for (final id in searchIds) {
+      try {
+        final tRow = await client
+            .from('teachers')
+            .select('id')
+            .or('id.eq.$id,profile_id.eq.$id')
+            .maybeSingle();
+        final resolved = tRow?['id']?.toString().trim();
+        if (_isUuid(resolved)) {
+          return resolved;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// Unified relational student resolution shared between Dashboard KPIs and My Students Roster.
+  /// Resolves both `profileId` (`profiles.id`) and `teacherTableId` (`teachers.id`) + `specializations`,
+  /// collecting student UUIDs from:
+  /// a) `live_sessions` where `teacher_id` is in `idCandidates`
+  /// b) `enrollments` where `course_id` is in courses assigned to this teacher
+  ///    (`courses.instructor_id` in `idCandidates`, OR where `courses.instructor_id == null`
+  ///    and `courses.instrument` matches `specialization`).
+  Future<Map<String, dynamic>> _resolveAssignedStudentsData(TeacherProfile teacher) async {
+    final client = _client;
+    if (client == null) {
+      return {
+        'idCandidates': <String>[],
+        'teacherSessions': <dynamic>[],
+        'teacherCourses': <Map<String, dynamic>>[],
+        'teacherEnrollments': <dynamic>[],
+        'assignedStudentIds': <String>{},
+      };
+    }
+
+    String teacherTableId = teacher.teacherTableId.trim();
+    String teacherProfileId = teacher.id.trim();
+    List<String> specializations = List<String>.from(teacher.instruments);
+
+    if ((teacherTableId.isEmpty || specializations.isEmpty) &&
+        (teacherProfileId.isNotEmpty || teacherTableId.isNotEmpty)) {
+      try {
+        final lookupId = teacherProfileId.isNotEmpty ? teacherProfileId : teacherTableId;
+        if (_isUuid(lookupId)) {
+          final tRow = await client
+              .from('teachers')
+              .select('id, profile_id, instruments')
+              .or('id.eq.$lookupId,profile_id.eq.$lookupId')
+              .maybeSingle();
+          if (tRow != null) {
+            if (teacherTableId.isEmpty && tRow['id'] != null) {
+              teacherTableId = tRow['id'].toString().trim();
+            }
+            if (teacherProfileId.isEmpty && tRow['profile_id'] != null) {
+              teacherProfileId = tRow['profile_id'].toString().trim();
+            }
+            if (specializations.isEmpty && tRow['instruments'] != null) {
+              final rawInst = tRow['instruments'];
+              if (rawInst is List) {
+                specializations = rawInst.map((e) => e.toString()).toList();
+              } else if (rawInst is String && rawInst.isNotEmpty) {
+                specializations = rawInst
+                    .split(',')
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    final idCandidates = <String>{
+      if (_isUuid(teacherTableId)) teacherTableId,
+      if (_isUuid(teacherProfileId)) teacherProfileId,
+    }.toList();
+
+    // a) Collect sessions & student UUIDs from live_sessions where teacher_id is in idCandidates
+    List<dynamic> teacherSessions = [];
+    if (idCandidates.isNotEmpty) {
+      try {
+        final orFilter = idCandidates.map((tid) => 'teacher_id.eq.$tid').join(',');
+        final sRes = await client
+            .from('live_sessions')
+            .select('id, teacher_id, student_id, course_id, scheduled_at, status, instructor_notes, agora_channel_name, jitsi_room_name, courses(title, instrument)')
+            .or(orFilter)
+            .order('scheduled_at', ascending: false);
+        teacherSessions = _safeList(sRes);
+      } catch (se) {
+        debugPrint('[TeacherApp] Sessions query note: $se');
+      }
+    }
+
+    // b) Collect courses assigned to this teacher (instructor_id in idCandidates, OR instructor_id == null & instrument matches specialization)
+    final teacherCourses = <Map<String, dynamic>>[];
+    try {
+      final cRes = await client
+          .from('courses')
+          .select('id, title, instrument, instructor_id');
+      for (final rawCourse in _safeList(cRes)) {
+        final c = _safeMap(rawCourse);
+        final instId = c['instructor_id']?.toString().trim() ?? '';
+        final courseInstrument = (c['instrument']?.toString() ?? '').trim().toLowerCase();
+        final courseTitle = (c['title']?.toString() ?? '').trim().toLowerCase();
+
+        final bool matchedByInstructorId = instId.isNotEmpty && idCandidates.contains(instId);
+        final bool matchedBySpecialization = instId.isEmpty &&
+            specializations.any((spec) {
+              final cleanSpec = spec.trim().toLowerCase();
+              if (cleanSpec.isEmpty) return false;
+              final firstWord = cleanSpec.split(' ').first;
+              return (courseInstrument.isNotEmpty &&
+                      (courseInstrument.contains(cleanSpec) ||
+                          cleanSpec.contains(courseInstrument) ||
+                          (firstWord.isNotEmpty && courseInstrument.contains(firstWord)))) ||
+                  (firstWord.isNotEmpty && courseTitle.contains(firstWord));
+            });
+
+        if (matchedByInstructorId || matchedBySpecialization) {
+          teacherCourses.add(c);
+        }
+      }
+    } catch (ce) {
+      debugPrint('[TeacherApp] Courses query note: $ce');
+    }
+
+    final courseIds = teacherCourses
+        .map((c) => c['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    List<dynamic> teacherEnrollments = [];
+    if (courseIds.isNotEmpty) {
+      try {
+        final enRes = await client
+            .from('enrollments')
+            .select('id, student_id, course_id, item_title, status, created_at')
+            .inFilter('course_id', courseIds);
+        teacherEnrollments = _safeList(enRes);
+      } catch (ee) {
+        debugPrint('[TeacherApp] Enrollments query note: $ee');
+      }
+    }
+
+    final assignedStudentIds = <String>{};
+    for (final s in teacherSessions) {
+      final sid = _safeMap(s)['student_id']?.toString().trim() ?? '';
+      if (_isUuid(sid)) assignedStudentIds.add(sid);
+    }
+    for (final e in teacherEnrollments) {
+      final sid = _safeMap(e)['student_id']?.toString().trim() ?? '';
+      if (_isUuid(sid)) assignedStudentIds.add(sid);
+    }
+
+    return {
+      'idCandidates': idCandidates,
+      'teacherSessions': teacherSessions,
+      'teacherCourses': teacherCourses,
+      'teacherEnrollments': teacherEnrollments,
+      'assignedStudentIds': assignedStudentIds,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // DASHBOARD METRICS (COMPUTED LIVE DIRECTLY FROM DATABASE)
   // ---------------------------------------------------------------------------
@@ -383,25 +575,21 @@ class TeacherSupabaseService {
         final now = DateTime.now();
         final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
-        // Build dual-ID filter to match sessions scheduled by Admin using either ID
-        final teacherIds = <String>[];
-        if (teacher.id.isNotEmpty) teacherIds.add(teacher.id);
-        if (teacher.teacherTableId.isNotEmpty && teacher.teacherTableId != teacher.id) {
-          teacherIds.add(teacher.teacherTableId);
-        }
-        final orFilter = teacherIds.isNotEmpty
-            ? teacherIds.map((tid) => 'teacher_id.eq.$tid').join(',')
-            : 'teacher_id.eq.${teacher.id}';
+        // 1 & 2. Resolve sessions and active students using the unified relational resolver
+        final resolved = await _resolveAssignedStudentsData(teacher);
+        final teacherSessions = resolved['teacherSessions'] as List<dynamic>;
+        final assignedStudentIds = resolved['assignedStudentIds'] as Set<String>;
 
-        // 1. Live sessions scheduled for this teacher today
-        final todaySessions = await client
-            .from('live_sessions')
-            .select('id, scheduled_at, status')
-            .or(orFilter);
-
-        for (final s in todaySessions) {
+        for (final rawSession in teacherSessions) {
+          final s = _safeMap(rawSession);
           final sched = s['scheduled_at']?.toString() ?? '';
-          if (sched.startsWith(todayStr)) {
+          final parsedLocal = DateTime.tryParse(sched)?.toLocal();
+          final isToday = parsedLocal != null
+              ? (parsedLocal.year == now.year &&
+                  parsedLocal.month == now.month &&
+                  parsedLocal.day == now.day)
+              : sched.startsWith(todayStr);
+          if (isToday) {
             classesToday++;
           }
           if (s['status'] == 'completed') {
@@ -409,41 +597,23 @@ class TeacherSupabaseService {
           }
         }
 
-        // 2. Active students taught by this teacher from live sessions & enrollments
-        final studentIds = <String>{};
-        final allSessions = await client
-            .from('live_sessions')
-            .select('student_id')
-            .or(orFilter);
-        for (final s in allSessions) {
-          final sId = s['student_id']?.toString();
-          if (sId != null && sId.isNotEmpty) studentIds.add(sId);
-        }
+        activeStudents = assignedStudentIds.length;
 
-        final enrollments = await client
-            .from('enrollments')
-            .select('student_id, item_title')
-            .eq('status', 'completed');
-        for (final e in enrollments) {
-          final title = (e['item_title']?.toString() ?? '').toLowerCase();
-          final sId = e['student_id']?.toString();
-          if (sId != null && sId.isNotEmpty) {
-            for (final inst in teacher.instruments) {
-              if (title.contains(inst.toLowerCase().split(' ').first)) {
-                studentIds.add(sId);
-                break;
-              }
-            }
+        // 3. Pending drill submissions: verified_by_teacher == null and (is_completed == true or student_submission_url != null)
+        final drillsRes = await client
+            .from('student_checklist_progress')
+            .select('*')
+            .isFilter('verified_by_teacher', null);
+        for (final rawDrill in _safeList(drillsRes)) {
+          final d = _safeMap(rawDrill);
+          final feedbackText = (d['teacher_notes'] ?? d['teacher_feedback'])?.toString().trim() ?? '';
+          if (feedbackText.isNotEmpty) continue;
+          final isCompleted = d['is_completed'] == true;
+          final submissionUrl = (d['student_submission_url'] ?? d['media_url'])?.toString().trim() ?? '';
+          if (isCompleted || submissionUrl.isNotEmpty) {
+            pendingReviews++;
           }
         }
-        activeStudents = studentIds.length;
-
-        // 3. Pending drill submissions
-        final drills = await client
-            .from('student_checklist_progress')
-            .select('id')
-            .eq('is_completed', false);
-        pendingReviews = drills.length;
       } catch (e) {
         debugPrint('[TeacherApp] Fetch dashboard stats notice: $e');
       }
@@ -460,6 +630,24 @@ class TeacherSupabaseService {
   // ---------------------------------------------------------------------------
   // STUDIO TIMETABLE & SESSIONS
   // ---------------------------------------------------------------------------
+
+  AttendanceState _mapSessionStatus(String? status, [bool attendanceMarked = false, String? notes]) {
+    switch (status?.toLowerCase().trim()) {
+      case 'completed':
+      case 'present':
+        return AttendanceState.present;
+      case 'cancelled':
+      case 'absent':
+        return AttendanceState.absent;
+      case 'excused':
+        return AttendanceState.excused;
+      default:
+        if (notes != null && notes.contains('[Attendance: EXCUSED]')) {
+          return AttendanceState.excused;
+        }
+        return AttendanceState.unmarked;
+    }
+  }
 
   /// Fetch studio schedule for the selected day from live_sessions table
   Future<List<TeacherClass>> fetchTeacherSchedule(TeacherProfile teacher, DateTime date) async {
@@ -500,9 +688,11 @@ class TeacherSupabaseService {
         final statusStr = m['status']?.toString() ?? 'scheduled';
         final notes = m['instructor_notes']?.toString() ?? '';
 
-        AttendanceState state = AttendanceState.unmarked;
-        if (statusStr == 'completed') state = AttendanceState.present;
-        if (statusStr == 'cancelled') state = AttendanceState.absent;
+        final AttendanceState state = _mapSessionStatus(
+          statusStr,
+          m['attendance_marked'] == true,
+          notes,
+        );
 
         final sessionDate = DateTime.tryParse(schedAt)?.toLocal();
         String timeFormatted = '10:00 AM';
@@ -562,29 +752,83 @@ class TeacherSupabaseService {
     final client = _client;
     if (client == null || sessionId.isEmpty) return false;
 
-    try {
-      String statusStr = 'scheduled';
-      if (state == AttendanceState.present) statusStr = 'completed';
-      if (state == AttendanceState.absent) statusStr = 'cancelled';
+    String statusValue = 'scheduled';
+    bool attendanceMarked = false;
+    switch (state) {
+      case AttendanceState.present:
+        statusValue = 'completed';
+        attendanceMarked = true;
+        break;
+      case AttendanceState.absent:
+        statusValue = 'cancelled';
+        attendanceMarked = true;
+        break;
+      case AttendanceState.excused:
+        statusValue = 'excused';
+        attendanceMarked = true;
+        break;
+      case AttendanceState.unmarked:
+        statusValue = 'scheduled';
+        attendanceMarked = false;
+        break;
+    }
 
+    try {
       await client.from('live_sessions').update({
-        'status': statusStr,
+        'status': statusValue,
       }).eq('id', sessionId);
       return true;
     } catch (e) {
-      debugPrint('[TeacherApp] Update attendance notice: $e');
+      debugPrint('[TeacherApp] Update attendance primary notice ($attendanceMarked): $e');
+      if (state == AttendanceState.excused) {
+        try {
+          await saveSessionNote(sessionId, '[Attendance: EXCUSED]');
+          return true;
+        } catch (_) {}
+      }
       return false;
     }
   }
 
-  /// Save teacher notes for a studio session
+  Future<bool> updateAttendance(String sessionId, AttendanceState state) =>
+      updateSessionAttendance(sessionId, state);
+
+  /// Save teacher notes for a studio session while preserving Director proctor or assignment metadata
   Future<bool> saveSessionNote(String sessionId, String notes) async {
     final client = _client;
     if (client == null || sessionId.isEmpty) return false;
 
     try {
+      String finalNotes = notes.trim();
+      try {
+        final existingRow = await client
+            .from('live_sessions')
+            .select('instructor_notes')
+            .eq('id', sessionId)
+            .maybeSingle();
+        final existingNotes = existingRow?['instructor_notes']?.toString().trim() ?? '';
+        if (existingNotes.isNotEmpty &&
+            (existingNotes.contains('[Proctor:') || existingNotes.contains('Assigned to faculty'))) {
+          final preservedParts = <String>[];
+          for (final part in existingNotes.split(RegExp(r'\s*\|\s*|\n'))) {
+            final trimmedPart = part.trim();
+            if (trimmedPart.contains('[Proctor:') || trimmedPart.contains('Assigned to faculty')) {
+              preservedParts.add(trimmedPart);
+            }
+          }
+          if (preservedParts.isNotEmpty) {
+            final preservedPrefix = preservedParts.join(' | ');
+            if (!finalNotes.contains(preservedPrefix)) {
+              finalNotes = finalNotes.isEmpty
+                  ? preservedPrefix
+                  : '$preservedPrefix | Lesson Note: $finalNotes';
+            }
+          }
+        }
+      } catch (_) {}
+
       await client.from('live_sessions').update({
-        'instructor_notes': notes,
+        'instructor_notes': finalNotes,
       }).eq('id', sessionId);
       return true;
     } catch (e) {
@@ -593,109 +837,39 @@ class TeacherSupabaseService {
     }
   }
 
+  Future<bool> updateSessionLessonNote(String sessionId, String lessonNote) =>
+      saveSessionNote(sessionId, lessonNote);
+
   // ---------------------------------------------------------------------------
   // ASSIGNED STUDENTS ROSTER
   // ---------------------------------------------------------------------------
 
   /// Fetch genuine students assigned to this teacher from Central Mind (Supabase).
-  /// Resolves assignments via `live_sessions` (where teacher_id matches this teacher)
-  /// and `enrollments` (where the course instructor_id matches this teacher).
+  /// Uses the unified `_resolveAssignedStudentsData` resolver so Dashboard KPIs
+  /// and the My Students Roster match 100%.
   Future<List<StudentRosterItem>> fetchAssignedStudents(TeacherProfile teacher) async {
     final client = _client;
     if (client == null) return [];
 
     try {
-      String teacherTableId = teacher.teacherTableId.trim();
-      final teacherProfileId = teacher.id.trim();
-
-      // If teacherTableId wasn't populated in memory, resolve it from the teachers table
-      if (teacherTableId.isEmpty && teacherProfileId.isNotEmpty) {
-        try {
-          final tRow = await client
-              .from('teachers')
-              .select('id')
-              .eq('profile_id', teacherProfileId)
-              .maybeSingle();
-          if (tRow != null && tRow['id'] != null) {
-            teacherTableId = tRow['id'].toString();
-          }
-        } catch (_) {}
-      }
-
-      // 1. Fetch live_sessions for this teacher to identify assigned students and session history
-      List<dynamic> teacherSessions = [];
-      try {
-        final orFilter = <String>[];
-        if (teacherTableId.isNotEmpty) orFilter.add('teacher_id.eq.$teacherTableId');
-        if (teacherProfileId.isNotEmpty) orFilter.add('teacher_id.eq.$teacherProfileId');
-
-        if (orFilter.isNotEmpty) {
-          final sRes = await client
-              .from('live_sessions')
-              .select('id, teacher_id, student_id, course_id, scheduled_at, status, instructor_notes, agora_channel_name, jitsi_room_name, courses(title, instrument)')
-              .or(orFilter.join(','))
-              .order('scheduled_at', ascending: false);
-          teacherSessions = _safeList(sRes);
-        }
-      } catch (se) {
-        debugPrint('[TeacherApp] Sessions query note: $se');
-      }
-
-      // 2. Fetch courses taught by this teacher to find enrolled learners
-      List<dynamic> teacherCourses = [];
-      try {
-        final orFilterCourses = <String>[];
-        if (teacherTableId.isNotEmpty) orFilterCourses.add('instructor_id.eq.$teacherTableId');
-        if (teacherProfileId.isNotEmpty) orFilterCourses.add('instructor_id.eq.$teacherProfileId');
-
-        if (orFilterCourses.isNotEmpty) {
-          final cRes = await client
-              .from('courses')
-              .select('id, title, instrument')
-              .or(orFilterCourses.join(','));
-          teacherCourses = _safeList(cRes);
-        }
-      } catch (ce) {
-        debugPrint('[TeacherApp] Courses query note: $ce');
-      }
-
-      final courseIds = teacherCourses
-          .map((c) => _safeMap(c)['id']?.toString() ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
-
-      // 3. Fetch enrollments for these courses
-      List<dynamic> teacherEnrollments = [];
-      if (courseIds.isNotEmpty) {
-        try {
-          final enRes = await client
-              .from('enrollments')
-              .select('id, student_id, course_id, item_title, status, created_at')
-              .inFilter('course_id', courseIds);
-          teacherEnrollments = _safeList(enRes);
-        } catch (ee) {
-          debugPrint('[TeacherApp] Enrollments query note: $ee');
-        }
-      }
-
-      // Collect all assigned student IDs
-      final assignedStudentIds = <String>{};
-      for (final s in teacherSessions) {
-        final sid = _safeMap(s)['student_id']?.toString() ?? '';
-        if (sid.isNotEmpty) assignedStudentIds.add(sid);
-      }
-      for (final e in teacherEnrollments) {
-        final sid = _safeMap(e)['student_id']?.toString() ?? '';
-        if (sid.isNotEmpty) assignedStudentIds.add(sid);
-      }
+      final resolved = await _resolveAssignedStudentsData(teacher);
+      final teacherSessions = resolved['teacherSessions'] as List<dynamic>;
+      final teacherCourses = resolved['teacherCourses'] as List<Map<String, dynamic>>;
+      final teacherEnrollments = resolved['teacherEnrollments'] as List<dynamic>;
+      final assignedStudentIds = resolved['assignedStudentIds'] as Set<String>;
 
       // If no students assigned to this teacher yet, return empty list (no phantom mock students)
       if (assignedStudentIds.isEmpty) {
         return [];
       }
 
-      // 4. Fetch profiles for assigned students
+      final coursesById = <String, Map<String, dynamic>>{};
+      for (final c in teacherCourses) {
+        final cid = c['id']?.toString() ?? '';
+        if (cid.isNotEmpty) coursesById[cid] = c;
+      }
+
+      // Fetch profiles for assigned students
       final pRes = await client
           .from('profiles')
           .select('id, student_id, first_name, last_name, email, phone, is_verified, created_at, enrollments(*)')
@@ -758,15 +932,35 @@ class TeacherSupabaseService {
         String instrument = teacher.instruments.isNotEmpty ? teacher.instruments.first : 'Piano';
 
         // Check if student has session with course title
+        bool resolvedCourseFromSession = false;
         for (final s in studentSessions) {
           final sm = _safeMap(s);
           final cMap = sm['courses'] as Map<String, dynamic>?;
           if (cMap != null) {
             final t = cMap['title']?.toString() ?? '';
             final inst = cMap['instrument']?.toString() ?? '';
-            if (t.isNotEmpty) courseName = t;
+            if (t.isNotEmpty) {
+              courseName = t;
+              resolvedCourseFromSession = true;
+            }
             if (inst.isNotEmpty) instrument = inst;
-            break;
+            if (resolvedCourseFromSession) break;
+          }
+        }
+
+        // Fallback to student's enrollment in this teacher's courses
+        if (!resolvedCourseFromSession) {
+          for (final rawEn in teacherEnrollments) {
+            final em = _safeMap(rawEn);
+            if (em['student_id']?.toString() == studentProfileId) {
+              final cid = em['course_id']?.toString() ?? '';
+              final courseMap = coursesById[cid];
+              final t = courseMap?['title']?.toString() ?? em['item_title']?.toString() ?? '';
+              final inst = courseMap?['instrument']?.toString() ?? '';
+              if (t.isNotEmpty) courseName = t;
+              if (inst.isNotEmpty) instrument = inst;
+              break;
+            }
           }
         }
 
@@ -857,7 +1051,30 @@ class TeacherSupabaseService {
         final drillTitle = chk['task_title']?.toString() ?? 'Practice Routine';
         final courseTitle = lesson['title']?.toString() ?? 'Masterclass Drill';
         final isCompleted = m['is_completed'] == true;
-        final notes = m['teacher_notes']?.toString() ?? '';
+
+        final rawFeedback = (m['teacher_notes'] ?? m['teacher_feedback'])?.toString().trim() ?? '';
+        final isReviewed = m['verified_by_teacher'] != null || rawFeedback.isNotEmpty;
+
+        final mediaUrl = (m['media_url'] ?? m['student_submission_url'])?.toString();
+
+        // Skip rows that have not been completed/submitted by the student and have not been reviewed
+        if (!isReviewed && !isCompleted && (mediaUrl == null || mediaUrl.trim().isEmpty)) {
+          continue;
+        }
+
+        double? ratingVal = (m['rating'] as num?)?.toDouble();
+        String cleanFeedback = rawFeedback;
+        if (rawFeedback.startsWith('[Rating:')) {
+          final endBracket = rawFeedback.indexOf(']');
+          if (endBracket != -1) {
+            final ratingHeader = rawFeedback.substring(0, endBracket + 1);
+            final numMatch = RegExp(r'([0-9]+(?:\.[0-9]+)?)\s*\/\s*5\.0').firstMatch(ratingHeader);
+            if (numMatch != null) {
+              ratingVal ??= double.tryParse(numMatch.group(1)!);
+            }
+            cleanFeedback = rawFeedback.substring(endBracket + 1).trim();
+          }
+        }
 
         final createdAtStr = m['created_at']?.toString() ?? m['updated_at']?.toString() ?? '';
         final createdDt = DateTime.tryParse(createdAtStr)?.toLocal();
@@ -881,7 +1098,6 @@ class TeacherSupabaseService {
           formattedDuration = '${mins.toString().padLeft(2, '0')}:${remSecs.toString().padLeft(2, '0')} mins';
         }
 
-        final mediaUrl = m['media_url']?.toString();
         String mediaType = m['media_type']?.toString() ?? 'Audio';
         if (mediaUrl != null && mediaUrl.isNotEmpty) {
           final lower = mediaUrl.toLowerCase();
@@ -895,7 +1111,6 @@ class TeacherSupabaseService {
         }
 
         final studentNotes = m['student_notes']?.toString() ?? '';
-        final ratingVal = (m['rating'] as num?)?.toDouble();
 
         subs.add(StudentSubmission(
           id: m['id']?.toString() ?? '',
@@ -908,9 +1123,9 @@ class TeacherSupabaseService {
           mediaType: mediaType,
           mediaUrl: mediaUrl,
           studentNotes: studentNotes,
-          isReviewed: isCompleted,
+          isReviewed: isReviewed,
           rating: ratingVal,
-          teacherFeedback: notes.isNotEmpty ? notes : null,
+          teacherFeedback: cleanFeedback.isNotEmpty ? cleanFeedback : null,
         ));
       }
 
@@ -936,13 +1151,18 @@ class TeacherSupabaseService {
     final targetId = progressId ?? submissionId ?? '';
     if (client == null || targetId.isEmpty) return false;
 
-    final tId = teacherId ?? _activeTeacher?.id ?? 'faculty';
+    final teacherTableId = await _resolveTeacherTableId(teacherId);
+    final cleanFeedback = feedback.trim();
+    final formattedFeedback = cleanFeedback.startsWith('[Rating:')
+        ? cleanFeedback
+        : '[Rating: ${rating.toStringAsFixed(1)}/5.0] $cleanFeedback';
 
     try {
       await client.from('student_checklist_progress').update({
         'is_completed': true,
-        'verified_by_teacher': tId,
-        'teacher_notes': feedback,
+        if (teacherTableId != null && _isUuid(teacherTableId))
+          'verified_by_teacher': teacherTableId,
+        'teacher_notes': formattedFeedback,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', targetId);
       return true;
@@ -952,45 +1172,89 @@ class TeacherSupabaseService {
     }
   }
 
-  /// Fetch authentic curriculum sheet music & PDF scores from Central Mind `lessons` table
-  Future<List<Map<String, dynamic>>> fetchCurriculumSheetMusic({String? courseId, String? courseName}) async {
+  /// Fetch authentic curriculum sheet music & PDF scores from Central Mind `lessons` and `store_items` tables
+  Future<List<Map<String, dynamic>>> fetchCurriculumSheetMusic({
+    String? teacherId,
+    String? courseId,
+    String? courseName,
+  }) async {
     final client = _client;
     if (client == null) return [];
+
+    final results = <Map<String, dynamic>>[];
 
     try {
       var query = client
           .from('lessons')
-          .select('id, title, duration_minutes, pdf_attachment_url, notes, order_index, courses(title, instrument)')
-          .not('pdf_attachment_url', 'is', null)
-          .neq('pdf_attachment_url', '');
+          .select('*, courses(title, instrument, instructor_id)');
 
       if (courseId != null && courseId.isNotEmpty && _isUuid(courseId)) {
         query = query.eq('course_id', courseId);
       }
 
       final res = await query.order('order_index');
-      final list = res as List;
-      final results = <Map<String, dynamic>>[];
-      for (final row in list) {
-        final pdf = row['pdf_attachment_url']?.toString();
-        if (pdf != null && pdf.isNotEmpty) {
+      final list = _safeList(res);
+      for (final rawRow in list) {
+        final row = _safeMap(rawRow);
+        final pdf = (row['pdf_attachment_url'] ?? row['sheet_music_url'])?.toString().trim() ?? '';
+        if (pdf.isNotEmpty) {
           final course = _safeMap(row['courses']);
+          final cTitle = course['title']?.toString() ?? courseName ?? 'Curriculum';
+          final inst = course['instrument']?.toString() ?? 'General';
+          final notes = row['notes']?.toString() ?? '';
+          final lowerUrl = pdf.toLowerCase();
+          final isAudio = lowerUrl.endsWith('.mp3') || lowerUrl.endsWith('.wav') || lowerUrl.endsWith('.m4a');
           results.add({
             'id': row['id']?.toString() ?? '',
             'title': row['title']?.toString() ?? 'Curriculum Sheet Music',
             'url': pdf,
-            'type': 'PDF',
-            'course': course['title']?.toString() ?? courseName ?? 'Curriculum',
-            'instrument': course['instrument']?.toString() ?? 'General',
-            'notes': row['notes']?.toString() ?? '',
+            'type': isAudio ? 'MP3' : 'PDF',
+            'course': cTitle,
+            'category': cTitle,
+            'instrument': inst,
+            'size': 'Cloudflare R2',
+            'notes': notes,
+            'desc': notes.isNotEmpty ? notes : 'Official KMC curriculum score for $cTitle ($inst).',
           });
         }
       }
-      return results;
     } catch (e) {
-      debugPrint('[TeacherApp] Fetch curriculum sheet music notice: $e');
-      return [];
+      debugPrint('[TeacherApp] Fetch curriculum lessons sheet music notice: $e');
     }
+
+    try {
+      final storeRes = await client
+          .from('store_items')
+          .select('id, title, category, description, author_or_brand, file_url')
+          .not('file_url', 'is', null)
+          .neq('file_url', '');
+      for (final rawRow in _safeList(storeRes)) {
+        final m = _safeMap(rawRow);
+        final fileUrl = m['file_url']?.toString().trim() ?? '';
+        if (fileUrl.isNotEmpty) {
+          final lowerUrl = fileUrl.toLowerCase();
+          final isAudio = lowerUrl.endsWith('.mp3') || lowerUrl.endsWith('.wav') || lowerUrl.endsWith('.m4a');
+          final category = m['category']?.toString() ?? 'Digital Resource';
+          final desc = m['description']?.toString() ?? '';
+          results.add({
+            'id': m['id']?.toString() ?? '',
+            'title': m['title']?.toString() ?? 'Faculty Resource',
+            'url': fileUrl,
+            'type': isAudio ? 'MP3' : 'PDF',
+            'course': category,
+            'category': category,
+            'instrument': m['author_or_brand']?.toString() ?? 'General',
+            'size': 'Cloudflare R2',
+            'notes': desc,
+            'desc': desc.isNotEmpty ? desc : 'Digital publication from KMC Resource Library.',
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[TeacherApp] Fetch store_items sheet music notice: $e');
+    }
+
+    return results;
   }
 
   // ---------------------------------------------------------------------------
@@ -1173,11 +1437,17 @@ class TeacherSupabaseService {
     if (client == null) return false;
 
     try {
+      final resolvedTeacherTableId = await _resolveTeacherTableId(teacherId) ?? teacherId;
+      if (!_isUuid(resolvedTeacherTableId)) {
+        debugPrint('[TeacherApp] Schedule session error: could not resolve valid teachers.id UUID.');
+        return false;
+      }
+
       final roomSlug = KmcChannelHelper.sanitize(studioRoom);
       // NOTE: live_sessions has no agora_token column. Tokens are minted on-device
       // at join time for the canonical channel, so we never persist them.
       await client.from('live_sessions').insert({
-        'teacher_id': teacherId,
+        'teacher_id': resolvedTeacherTableId,
         'student_id': studentId,
         if (courseId != null && courseId.isNotEmpty) 'course_id': courseId,
         'scheduled_at': scheduledAt.toIso8601String(),
@@ -1262,12 +1532,11 @@ class TeacherSupabaseService {
 
       // 2. Ad-hoc studio session (or the update matched nothing): insert a fresh live row.
       if (liveRowId == null) {
-        final rawTeacherId = _activeTeacher?.teacherTableId.isNotEmpty == true
-            ? _activeTeacher!.teacherTableId
-            : (_activeTeacher?.id ?? '');
-        final teacherIdToUse = _isUuid(rawTeacherId)
-            ? rawTeacherId
-            : 'd552a6f0-cb51-4d73-937e-14dd9f754fa7'; // Senior Faculty David Otieno
+        final teacherTableId = await _resolveTeacherTableId(_activeTeacher?.teacherTableId);
+        if (teacherTableId == null || !_isUuid(teacherTableId)) {
+          debugPrint('[TeacherApp] Start live broadcast error: could not resolve valid teachers.id for active faculty.');
+          return null;
+        }
         // student_id is a UUID FK to profiles; admission numbers like 'KMC-2026-1042'
         // would fail the insert, so they fall back to an open (student_id = null) room.
         final targetStudentId = _isUuid(studentProfileId)
@@ -1277,7 +1546,7 @@ class TeacherSupabaseService {
         final inserted = await client
             .from('live_sessions')
             .insert({
-              'teacher_id': teacherIdToUse,
+              'teacher_id': teacherTableId,
               'student_id': targetStudentId,
               'scheduled_at': DateTime.now().toUtc().toIso8601String(),
               'agora_channel_name': roomSlug,
