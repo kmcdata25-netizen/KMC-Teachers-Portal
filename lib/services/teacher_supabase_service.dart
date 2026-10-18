@@ -60,84 +60,95 @@ class TeacherSupabaseService {
       return AuthResult.failure('Cannot connect to Central Mind. Offline mode.');
     }
 
+    final trimmed = identifier.trim().toLowerCase();
+    final cleanPassword = password.trim();
+
+    if (cleanPassword.isEmpty) {
+      return AuthResult.failure('Please enter your portal password.');
+    }
+
     try {
-      final trimmed = identifier.trim().toLowerCase();
+      String emailToAuth = trimmed;
 
-      // 1. Try Supabase Auth password signIn if identifier looks like an email
-      if (trimmed.contains('@')) {
-        try {
-          final res = await client.auth.signInWithPassword(
-            email: trimmed,
-            password: password.trim(),
-          );
-          if (res.user != null) {
-            // Verify role in profiles table
-            final profileRes = await client
-                .from('profiles')
-                .select('role')
-                .eq('id', res.user!.id)
-                .maybeSingle();
+      // If identifier is not an email (e.g. Faculty ID KMC-FAC-014 or digits), find associated email
+      if (!trimmed.contains('@')) {
+        final query = client
+            .from('profiles')
+            .select('email, role')
+            .eq('role', 'teacher')
+            .or('student_id.ilike.%$trimmed%,phone.ilike.%$trimmed%');
 
-            if (profileRes != null && profileRes['role'] != 'teacher') {
-              await client.auth.signOut();
-              return AuthResult.failure(
-                'Access Denied: This account is registered as a student. Only authorized KMC faculty may access the Teacher Portal.',
-              );
-            }
-
-            final teacherProfile = await fetchTeacherProfile(res.user!.id);
-            if (teacherProfile != null) {
-              await _saveSession(teacherProfile.id, teacherProfile.email);
-              _activeTeacher = teacherProfile;
-              return AuthResult.success(teacherProfile);
+        final dynamic res = await query;
+        final list = res as List;
+        if (list.isNotEmpty && list.first['email'] != null) {
+          emailToAuth = list.first['email'].toString().toLowerCase().trim();
+        } else {
+          // Check by digits in faculty code
+          final all = await fetchAllFaculty();
+          final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+          TeacherProfile? match;
+          for (final f in all) {
+            final fDigits = f.facultyId.replaceAll(RegExp(r'[^0-9]'), '');
+            if (f.facultyId.toLowerCase() == trimmed ||
+                (digits.isNotEmpty && fDigits.endsWith(digits))) {
+              match = f;
+              break;
             }
           }
-        } catch (authError) {
-          debugPrint('[TeacherApp] Supabase auth try notice: $authError');
+          if (match != null && match.email.isNotEmpty) {
+            emailToAuth = match.email.toLowerCase().trim();
+          } else {
+            return AuthResult.failure(
+              'Faculty account "$identifier" was not found in the KMC database.',
+            );
+          }
         }
       }
 
-      // 2. Query Central Mind profiles table by faculty code or email
-      final query = client
-          .from('profiles')
-          .select('*, teachers(*)')
-          .eq('role', 'teacher');
+      // Strictly authenticate credentials against Supabase Auth
+      try {
+        final res = await client.auth.signInWithPassword(
+          email: emailToAuth,
+          password: cleanPassword,
+        );
 
-      final results = trimmed.contains('@')
-          ? await query.eq('email', trimmed)
-          : await query.or('student_id.ilike.%$trimmed%,phone.ilike.%$trimmed%');
-
-      final list = results as List;
-      if (list.isNotEmpty) {
-        final row = list.first as Map<String, dynamic>;
-        final teacherData = _extractTeacherData(row['teachers']);
-
-        final teacherObj = _mapToTeacherProfile(row, teacherData);
-        await _saveSession(teacherObj.id, teacherObj.email);
-        _activeTeacher = teacherObj;
-        return AuthResult.success(teacherObj);
-      }
-
-      // 3. Fallback: fuzzy match against all registered faculty (extract digits from e.g. KMC-FAC-014 or FAC-14)
-      final allFaculty = await fetchAllFaculty();
-      final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
-      for (final f in allFaculty) {
-        final fDigits = f.facultyId.replaceAll(RegExp(r'[^0-9]'), '');
-        if (f.email.toLowerCase() == trimmed ||
-            f.facultyId.toLowerCase() == trimmed ||
-            f.phone.contains(trimmed) ||
-            f.name.toLowerCase().contains(trimmed) ||
-            (digits.isNotEmpty && fDigits.endsWith(digits)) ||
-            (digits.isNotEmpty && digits.endsWith(fDigits))) {
-          await _saveSession(f.id, f.email);
-          _activeTeacher = f;
-          return AuthResult.success(f);
+        if (res.user == null) {
+          return AuthResult.failure('Invalid email or password.');
         }
-      }
 
-      return AuthResult.failure(
-        'Faculty account not found. Please verify your Faculty Code or KMC Staff Email.',
-      );
+        // Verify role in profiles table
+        final profileRes = await client
+            .from('profiles')
+            .select('role')
+            .eq('id', res.user!.id)
+            .maybeSingle();
+
+        if (profileRes != null && profileRes['role'] != 'teacher') {
+          await client.auth.signOut();
+          return AuthResult.failure(
+            'Access Denied: This account is registered as a student. Only authorized KMC faculty may access the Teacher Portal.',
+          );
+        }
+
+        final teacherProfile = await fetchTeacherProfile(res.user!.id);
+        if (teacherProfile != null) {
+          await _saveSession(teacherProfile.id, teacherProfile.email);
+          _activeTeacher = teacherProfile;
+          return AuthResult.success(teacherProfile);
+        } else {
+          return AuthResult.failure('Faculty instructor profile could not be loaded.');
+        }
+      } on AuthApiException catch (authErr) {
+        debugPrint('[TeacherApp] AuthApiException: ${authErr.message}');
+        final msg = authErr.message.toLowerCase();
+        if (msg.contains('invalid') || msg.contains('credentials') || msg.contains('password')) {
+          return AuthResult.failure('Invalid email or password. Please verify your credentials.');
+        }
+        return AuthResult.failure(authErr.message);
+      } catch (authError) {
+        debugPrint('[TeacherApp] Auth error: $authError');
+        return AuthResult.failure('Invalid login credentials. Please check your password.');
+      }
     } catch (e) {
       debugPrint('[TeacherApp] Login exception: $e');
       return AuthResult.failure('Authentication error: $e');
