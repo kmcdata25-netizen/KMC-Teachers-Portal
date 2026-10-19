@@ -1389,38 +1389,7 @@ class TeacherSupabaseService {
     }
   }
 
-  /// Launch Jitsi Meet Virtual Studio Room for interactive online masterclass
-  Future<bool> launchLiveStudioRoom(String roomName) async {
-    final cleanRoom = roomName
-        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
-        .toLowerCase()
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
-    final roomUrl = 'https://meet.jit.si/kmc_masterclass_$cleanRoom';
-    final uri = Uri.parse(roomUrl);
-    debugPrint('[TeacherApp] Launching live studio room: $roomUrl');
 
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (ok) return true;
-    } catch (e) {
-      debugPrint('[TeacherApp] Jitsi externalApplication notice: $e');
-    }
-
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
-      if (ok) return true;
-    } catch (e) {
-      debugPrint('[TeacherApp] Jitsi platformDefault notice: $e');
-    }
-
-    try {
-      return await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    } catch (e) {
-      debugPrint('[TeacherApp] Jitsi inAppBrowserView notice: $e');
-      return false;
-    }
-  }
 
   /// Schedule a new 1-on-1 Studio Session directly from the Teacher Portal
   Future<bool> scheduleStudioSession({
